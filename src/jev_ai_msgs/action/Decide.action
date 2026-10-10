@@ -1,0 +1,17 @@
+# Remote access to a DecisionEngine hosted by decide_server (C++, BT, CLI).
+uint8 INTERFACE_VERSION=1
+
+string agent                     # engine instance key (e.g. node FQN)
+string question_set
+diagnostic_msgs/KeyValue[] state
+jev_ai_msgs/ClassRef[] mask      # forbidden (question, class)
+jev_ai_msgs/ClassRef[] require   # forced (question, class)
+jev_ai_msgs/ClassRef[] current   # current class per question (for hysteresis)
+string[] triggers
+string subject
+string directive_issuer          # set when answering a directive (coupling epoch)
+uint64 directive_id
+---
+jev_ai_msgs/Decision decision    # final: COMMITTED | KEPT | FALLBACK | FORCED
+---
+jev_ai_msgs/Decision decision    # PROVISIONAL, then REVISED/KEPT as augmentation arrives

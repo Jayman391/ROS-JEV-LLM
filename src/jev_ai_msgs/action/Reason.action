@@ -1,0 +1,22 @@
+# System 2: one LLM call, optionally schema-constrained and streamed.
+uint8 INTERFACE_VERSION=1
+
+string system                    # stable per caller, so it is prompt-cached
+string context                   # free text / JSON for the model
+string response_schema           # JSON Schema; "" = free text
+string model                     # "" = server default
+diagnostic_msgs/KeyValue[] options   # provider options, e.g. effort=low, max_tokens=800
+bool stream_text                 # false = coarse feedback only
+---
+bool success
+string error
+string text
+string json
+string model
+uint32 input_tokens
+uint32 output_tokens
+float64 cost_usd
+float64 latency_ms
+---
+string stage                     # queued | started | first_token | streaming | done
+string delta                     # only when stream_text

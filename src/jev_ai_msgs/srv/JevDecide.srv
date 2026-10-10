@@ -1,0 +1,14 @@
+# System 1: answer all questions against one state in one Jev pass.
+uint8 INTERFACE_VERSION=1
+
+diagnostic_msgs/KeyValue[] state
+jev_ai_msgs/Question[] questions
+string model                     # "" = server default
+---
+bool success                     # false only if the whole call failed
+string error
+string model                     # exact version that answered
+jev_ai_msgs/Distribution[] answers
+string[] question_errors         # aligned with questions; "" = ok (per-question fault isolation)
+float64 latency_ms
+uint32 input_tokens

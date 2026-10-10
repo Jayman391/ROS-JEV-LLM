@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .claude/worktrees/
+
+# colcon
+install/
+log/

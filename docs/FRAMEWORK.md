@@ -176,6 +176,8 @@ string question
 string cls
 
 # msg/Decision.msg
+string PROVISIONAL=PROVISIONAL   # also REVISED, KEPT, COMMITTED, FALLBACK, FORCED (string constants:
+                                 # readable in records/CLI, comparable as Decision::COMMITTED in C++)
 uint64 decision_id
 uint64 generation
 string phase                     # PROVISIONAL | REVISED | KEPT | COMMITTED | FALLBACK | FORCED
