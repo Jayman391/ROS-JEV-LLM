@@ -43,13 +43,24 @@ RUN rosdep init || true && rosdep update
 # Source ROS in every interactive shell
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
 
+# Virtual display for GUI apps (Gazebo GUI, rviz2). XQuartz can't provide the
+# OpenGL visuals Gazebo needs, so the GUI runs on Xvfb and is viewed via noVNC.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb x11vnc novnc websockify libgl1-mesa-dri mesa-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Same environment as setup.bash, so `docker compose exec` commands can run
 # ROS tools without a login shell
 ENV AMENT_PREFIX_PATH=/opt/ros/humble \
     LD_LIBRARY_PATH=/opt/ros/humble/lib \
     PYTHONPATH=/opt/ros/humble/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages \
-    PATH=/opt/ros/humble/bin:/usr/local/bin:/usr/bin:/bin
+    PATH=/opt/ros/humble/bin:/usr/local/bin:/usr/bin:/bin \
+    DISPLAY=:99
 
 WORKDIR /ws
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]

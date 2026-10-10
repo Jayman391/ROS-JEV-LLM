@@ -7,9 +7,11 @@ services:
     # Mount the repo so edits on the Mac are visible inside the container
     volumes:
       - .:/ws/ROS-JEV
+    # GUI apps (Gazebo, rviz2) render on the in-container display and are
+    # viewed in a browser at http://localhost:6080/vnc.html
+    ports:
+      - "127.0.0.1:6080:6080"
     environment:
-      # XQuartz GUI (rviz2, Gazebo GUI). Needs XQuartz running, see README.
-      - DISPLAY=host.docker.internal:0
       # Gazebo GUI in a VM has no GPU; software rendering avoids GL failures
       - LIBGL_ALWAYS_SOFTWARE=1
       - ROS_DOMAIN_ID=0
