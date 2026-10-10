@@ -1,0 +1,18 @@
+services:
+  ros2:
+    build: .
+    image: ros-jev:humble
+    container_name: ros-jev
+    working_dir: /ws/ROS-JEV
+    # Mount the repo so edits on the Mac are visible inside the container
+    volumes:
+      - .:/ws/ROS-JEV
+    environment:
+      # XQuartz GUI (rviz2, Gazebo GUI). Needs XQuartz running, see README.
+      - DISPLAY=host.docker.internal:0
+      # Gazebo GUI in a VM has no GPU; software rendering avoids GL failures
+      - LIBGL_ALWAYS_SOFTWARE=1
+      - ROS_DOMAIN_ID=0
+    stdin_open: true
+    tty: true
+    command: bash

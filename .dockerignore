@@ -1,0 +1,5 @@
+.git
+.claude
+.venv
+__pycache__
+*.py[oc]
