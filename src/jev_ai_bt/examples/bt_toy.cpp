@@ -2,6 +2,7 @@
 // The app part is the simulated world, which writes {state}/{mask}/{require}, and <Act>.
 //
 //   ros2 launch jev_ai_examples toy_patrol.launch.py agents:=0 bt_agents:=1
+#include <csignal>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -123,6 +124,7 @@ int main(int argc, char ** argv)
     tree.tickOnce();
     tree.sleep(std::chrono::milliseconds(50));
   }
+  std::signal(SIGINT, SIG_IGN);   // Ctrl-C arrives twice under launch (group + forward)
   tree.haltTree();
   executor.cancel();
   spinner.join();

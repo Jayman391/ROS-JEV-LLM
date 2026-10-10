@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!-- turtlesim example (A9), BT variant: the decision loop in XML. The app (turtle_agent
+     mode:=bt) keeps {state}, {mask} and {event} fresh and applies each new {decision}. -->
+<root BTCPP_format="4" main_tree_to_execute="Turtle">
+  <BehaviorTree ID="Turtle">
+    <Repeat num_cycles="-1">
+      <Sequence>
+        <Decide question_set="move" agent="{agent}" state="{state}" mask="{mask}"
+                trigger="{event}" question="action" selected="{action}" decision="{decision}"/>
+        <Script code="event := ''"/>
+        <Sleep msec="500"/>
+      </Sequence>
+    </Repeat>
+  </BehaviorTree>
+</root>

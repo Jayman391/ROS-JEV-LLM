@@ -14,6 +14,8 @@
   <exec_depend>jev_ai_bringup</exec_depend>
   <exec_depend>jev_ai_cpp</exec_depend>
   <exec_depend>jev_ai_bt</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>turtlesim</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

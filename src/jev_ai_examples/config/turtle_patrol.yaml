@@ -1,0 +1,29 @@
+# turtlesim example catalog (A9): turtles patrol the arena, avoid walls, respond to alerts.
+# Used in-process by the Python turtle and through decide_server by the C++ and BT turtles.
+catalog_version: 1
+name: turtle_patrol
+question_sets:
+  move:
+    state_keys: [wall_ahead, position, alert, neighbour]
+    tick_hz: 2.0
+    augment: true
+    group: turtles
+    questions:
+      action:
+        type: choice
+        instructions: "Choose the turtle's next movement."
+        act: sample
+        classes:
+          - {name: forward, criteria: "Keep moving straight ahead.", reversible: true}
+          - {name: turn_left, criteria: "Turn left about 90 degrees.", reversible: true}
+          - {name: turn_right, criteria: "Turn right about 90 degrees.", reversible: true}
+          - {name: go_to_alert, criteria: "Head straight to the active alert.", reversible: true}
+        fallback: turn_left            # always allowed (forward is masked near walls)
+        tau: 0.5
+        kappa: 0.7
+        coupling: 0.5
+    llm:
+      system: "You steer {agent}, one of several turtles patrolling an 11 x 11 m arena. Keep moving, avoid walls, spread out from other turtles, and when there is an alert the nearest turtle should go to it while the others keep patrolling."
+policy:
+  T_dwell: 1.0                         # turtles may switch every second
+  k_max: 20                            # augmentations/min per turtle (Haiku: ~$0.10/h for 3)

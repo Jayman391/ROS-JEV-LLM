@@ -15,6 +15,7 @@ import json
 import math
 import time
 
+import rclpy
 from jev_ai_msgs.action import Reason
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 
@@ -107,7 +108,7 @@ class LlmServer(BackendServer):
             account=lambda r: (r.input_tokens + r.output_tokens, r.cost_usd))
         res = Reason.Result(success=False, error=error, latency_ms=ms)
         if error == 'cancelled':
-            goal_handle.canceled()
+            _end(goal_handle, 'canceled')
             return res
         if r is not None:
             res.text, res.model, res.cost_usd = r.text, r.model, r.cost_usd
@@ -120,14 +121,24 @@ class LlmServer(BackendServer):
                     res.json, res.error = '', 'response is not valid JSON'  # engine retries, §7
             res.success = not res.error
         if not res.success:
-            goal_handle.abort()
+            _end(goal_handle, 'abort')
             return res
-        goal_handle.succeed()
+        _end(goal_handle, 'succeed')
         self.record(request_key(req), {
             'text': res.text, 'json': res.json, 'model': res.model,
             'input_tokens': res.input_tokens, 'output_tokens': res.output_tokens,
             'cost_usd': res.cost_usd})
         return res
+
+
+def _end(goal_handle, transition: str) -> None:
+    """Terminal goal transition. After Ctrl-C the context is already down and publishing the
+    status fails; the goal dies with the server then, which is not an error."""
+    try:
+        getattr(goal_handle, transition)()
+    except Exception:                                    # noqa: BLE001 - rclpy RCLError
+        if rclpy.ok():
+            raise
 
 
 def main(args=None) -> None:

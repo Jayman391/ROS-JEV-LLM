@@ -94,11 +94,15 @@ class AsyncLoop:
 
     def __init__(self):
         self.loop = asyncio.new_event_loop()
+        self.stopped = False
         self._thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self._thread.start()
 
     def submit(self, coro) -> concurrent.futures.Future:
         """``future.cancel()`` cancels the asyncio task, which aborts the backend's request."""
+        if self.stopped:                         # shutting down: fail now, not at the deadline
+            coro.close()
+            raise RuntimeError('server shutting down')
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
     def run(self, coro, timeout: float | None = None):
@@ -110,7 +114,14 @@ class AsyncLoop:
             raise TimeoutError(f'timed out after {timeout:g} s') from None
 
     def stop(self) -> None:
-        self.loop.call_soon_threadsafe(self.loop.stop)
+        """Cancel in-flight backend calls (their waiters return at once), then stop the loop."""
+        self.stopped = True
+
+        def cancel_all():
+            for task in asyncio.all_tasks(self.loop):
+                task.cancel()
+            self.loop.call_soon(self.loop.stop)      # after the cancellations have run
+        self.loop.call_soon_threadsafe(cancel_all)
         self._thread.join(timeout=2)
 
 

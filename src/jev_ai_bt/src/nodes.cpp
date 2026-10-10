@@ -222,9 +222,14 @@ public:
     const auto gen = inbox_->reset();
     jev_.ask(
       *state, {q}, [inbox = inbox_, gen](auto res, const std::string & error) {
+        // any peer can answer jev/decide: validate before indexing
         std::string err = error;
-        if (res && (res->answers.empty() || !res->question_errors.front().empty())) {
-          err = res->question_errors.empty() ? "no answer" : res->question_errors.front();
+        if (res && !res->question_errors.empty() && !res->question_errors.front().empty()) {
+          err = res->question_errors.front();
+        } else if (res && (res->answers.empty() || res->answers.front().probabilities.empty() ||
+          res->answers.front().probabilities.size() != res->answers.front().classes.size()))
+        {
+          err = "malformed answer";
         }
         inbox->put(gen, err.empty() ? std::optional<jev_ai_msgs::msg::Distribution>(
           res->answers.front()) : std::nullopt, err);

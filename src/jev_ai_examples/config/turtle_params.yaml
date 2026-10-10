@@ -1,0 +1,20 @@
+# turtlesim example overrides of jev_ai_bringup/config/params.yaml (same keyless mocks as toy_patrol;
+# the mock_rules hook also answers the turtle catalog).
+jev_server:
+  ros__parameters:
+    mock:
+      seed: 7
+      first_bias: 0.1
+      latency_s: 0.05
+      rules: jev_ai_examples.mock_rules:patrol
+
+llm_server:
+  ros__parameters:
+    mock:
+      seed: 7
+      disagreement: 0.35
+      latency_s: 0.8
+
+decision_logger:
+  ros__parameters:
+    path: /tmp/jev_ai/turtlesim.jsonl

@@ -394,6 +394,7 @@ def run(make_node: Callable[[], object], args=None, threads: int = 4,
     finally:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         if on_exit:
-            on_exit(node)
+            on_exit(node)                     # e.g. cancel backend calls: callbacks return now
+        executor.shutdown(timeout_sec=2.0)    # in-flight callbacks finish before the node goes
         node.destroy_node()
         rclpy.try_shutdown()

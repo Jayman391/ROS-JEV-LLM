@@ -13,6 +13,9 @@
   <depend>behaviortree_cpp</depend>
   <depend>jev_ai_cpp</depend>
   <depend>rclcpp</depend>
+  <!-- examples -->
+  <depend>geometry_msgs</depend>
+  <depend>turtlesim</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

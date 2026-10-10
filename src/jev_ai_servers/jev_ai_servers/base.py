@@ -156,9 +156,8 @@ class BackendServer(LifecycleNode):
         attempts = 1 + max(0, self.p('max_retries'))
         error = ''
         for _ in range(attempts):
-            fut = self.loop.submit(make_coro())
             try:
-                result = self._wait(fut, deadline, cancelled)
+                result = self._wait(self.loop.submit(make_coro()), deadline, cancelled)
             except _Cancelled:
                 return None, 'cancelled', (time.monotonic() - t0) * 1e3
             except BackendError as e:

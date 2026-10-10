@@ -22,5 +22,7 @@ setup(
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={'console_scripts': ['toy_patrol = jev_ai_examples.toy_patrol:main',
-                                      'toy_supervisor = jev_ai_examples.toy_supervisor:main']},
+                                      'toy_supervisor = jev_ai_examples.toy_supervisor:main',
+                                      'turtle_agent = jev_ai_examples.turtle_agent:main',
+                                      'turtle_arena = jev_ai_examples.turtle_agent:arena_main']},
 )
