@@ -43,6 +43,13 @@ RUN rosdep init || true && rosdep update
 # Source ROS in every interactive shell
 RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
 
+# Same environment as setup.bash, so `docker compose exec` commands can run
+# ROS tools without a login shell
+ENV AMENT_PREFIX_PATH=/opt/ros/humble \
+    LD_LIBRARY_PATH=/opt/ros/humble/lib \
+    PYTHONPATH=/opt/ros/humble/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages \
+    PATH=/opt/ros/humble/bin:/usr/local/bin:/usr/bin:/bin
+
 WORKDIR /ws
 
-CMD ["bash"]
+CMD ["sleep", "infinity"]
