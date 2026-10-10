@@ -15,6 +15,7 @@ from launch.conditions import IfCondition
 from launch.substitutions import EnvironmentVariable, PythonExpression
 from launch.substitutions import LaunchConfiguration as Arg
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 PARAMS = get_package_share_directory('jev_ai_bringup') + '/config/params.yaml'
 
@@ -29,6 +30,8 @@ def generate_launch_description():
                               description='anthropic | openai_compat | mock | replay'),
         DeclareLaunchArgument('catalog', default_value='',
                               description='catalog YAML for decide_server ("" = no decide_server)'),
+        DeclareLaunchArgument('run_id', default_value='',
+                              description='decide_server run_id ("" = a fresh one)'),
         DeclareLaunchArgument('logger', default_value='true'),
         DeclareLaunchArgument('dashboard', default_value='true'),
         DeclareLaunchArgument('dashboard_port', default_value='8080'),
@@ -41,7 +44,8 @@ def generate_launch_description():
              parameters=[params, {'backend': Arg('llm_backend')}]),
         # decide_server hosts engines for C++/BT/CLI clients; only when given a catalog
         Node(package='jev_ai_servers', executable='decide_server', name='decide_server',
-             output='screen', parameters=[{'catalog': Arg('catalog')}],
+             output='screen', parameters=[{'catalog': Arg('catalog'),
+                                          'run_id': ParameterValue(Arg('run_id'), value_type=str)}],
              condition=IfCondition(PythonExpression(["'", Arg('catalog'), "' != ''"]))),
         Node(package='jev_ai_servers', executable='decision_logger', name='decision_logger',
              output='screen', parameters=[params], condition=IfCondition(Arg('logger'))),

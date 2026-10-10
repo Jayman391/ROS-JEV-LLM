@@ -1,0 +1,22 @@
+# toy_patrol supervisor catalog (A7): decides the fleet's standing order from worker reports.
+catalog_version: 1
+name: fleet_supervisor
+question_sets:
+  fleet_order:
+    state_keys: [reports, fleet, order]
+    tick_hz: 0                         # event-driven: a report with a new detection
+    augment: true
+    questions:
+      order:
+        type: choice
+        instructions: "Decide the standing order for the patrol fleet."
+        act: sample
+        classes:
+          - {name: carry_on, criteria: "Robots keep patrolling on their own.", reversible: true}
+          - {name: converge, criteria: "All robots converge on the most urgent reported detection; worth it when a person may be involved.", reversible: true}
+        fallback: carry_on
+        tau: 0.5
+        kappa: 0.7
+    llm:
+      system: "You supervise a fleet of patrol robots as {agent}. Converge the fleet only when a report may involve a person; otherwise let robots patrol on their own."
+policy: {}

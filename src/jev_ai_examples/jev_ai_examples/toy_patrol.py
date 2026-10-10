@@ -10,17 +10,20 @@ smoke come and go, the link flickers. The app supplies what §5.1 asks of any ap
 - ``on_decision`` executes the selection; inspections pass a commit point after 1 s and
   complete after 4 s.
 A halted robot gets an "operator battery swap" after 8 s so the demo keeps cycling.
+
+Hierarchy (A7): when its own ``report_now`` decision says true, the robot reports upward; a
+``converge`` directive from the supervisor shares the target, enters the state as ``orders`` and
+is a decision event in the directive's epoch, so robots answering it share their noise.
 """
 from __future__ import annotations
 
 import random
 
-import rclpy
 from ament_index_python.packages import get_package_share_directory
-from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 
-from jev_ai import Decision, DecisionEngine
+from jev_ai import Decision, DecisionEngine, Hierarchy
+from jev_ai.ros.engine import run
 
 
 class ToyPatrol(Node):
@@ -34,10 +37,19 @@ class ToyPatrol(Node):
         self.task, self.detection, self.hazard, self.link = 'patrolling', 'none', 'none', 'good'
         self.inspect = None            # (commit_at, done_at) while inspecting
         self.reset_at = None
-        self.engine = DecisionEngine(self, catalog, encode_state=self.encode, mask=self.mask,
+        self.orders, self.orders_until = 'none', 0.0
+        # one run_id for the whole fleet: group noise is H(run_id, group, ...), so coupling (§6.3)
+        # only happens between agents that share it ('' = this agent alone)
+        run_id = self.declare_parameter('run_id', '').value or None
+        self.engine = DecisionEngine(self, catalog, run_id=run_id, encode_state=self.encode,
+                                     mask=self.mask,
                                      require=self.require, on_decision=self.act,
+                                     all_phases=True,      # KEPT too: reports wait for final
                                      on_degraded=lambda qs: self.get_logger().warn(
                                          f'{qs}: Jev degraded, holding fallback'))
+        supervisor = self.declare_parameter('supervisor', '/supervisor').value
+        self.hierarchy = Hierarchy(self, engine=self.engine, qset='next_step',
+                                   on_directive=self.obey, issuer_allowlist=[supervisor])
         self.create_timer(0.5, self.step)
 
     # --- the four app callbacks (§5.1) ----------------------------------------------------------
@@ -45,8 +57,19 @@ class ToyPatrol(Node):
     def encode(self, qset: str) -> dict[str, str]:
         e = round(self.energy)
         level = 'ok' if e >= 40 else 'low' if e >= 15 else 'critical'
+        orders = self.orders if self.now() < self.orders_until else 'none'
         return {'task': self.task, 'energy': f'{level} ({e}%)', 'link': self.link,
-                'hazards': self.hazard, 'detection': self.detection}
+                'hazards': self.hazard, 'detection': self.detection, 'orders': orders}
+
+    def obey(self, msg, payload: dict) -> None:
+        """A supervisor directive (before the engine decides on it)."""
+        if msg.kind != 'converge' or self.task == 'halted':
+            return
+        target = str(payload.get('target', ''))
+        if self.detection == 'none' and target:
+            self.detection = target                     # shared target: inspect is unmasked
+        self.orders = f'converge on {target} (from {msg.issuer})'
+        self.orders_until = self.now() + float(payload.get('ttl_s', 15.0))
 
     def mask(self, qset: str) -> dict[str, set[str]]:
         return {'next_action': {'inspect'}} if self.detection == 'none' else {}
@@ -56,7 +79,7 @@ class ToyPatrol(Node):
 
     def act(self, d: Decision) -> None:
         now = self.now()
-        action = d.selected.get('next_action')
+        action = d.selected.get('next_action') if d.act else None   # KEPT: already executing
         if action == 'halt_now' and self.task != 'halted':
             self.task, self.inspect, self.reset_at = 'halted', None, now + 8.0
         elif action == 'inspect' and self.inspect is None and self.task != 'halted':
@@ -65,6 +88,11 @@ class ToyPatrol(Node):
         elif action == 'continue' and self.task != 'halted':
             self.task, self.inspect = 'patrolling', None
         if d.selected.get('report_now') == 'true' and d.final:
+            self.hierarchy.report('status', subject=self.detection,
+                                  priority=float(d.values.get('urgency.level_mean', 0.0)),
+                                  beliefs=d.fused, payload={
+                                      'task': self.task, 'energy': round(self.energy),
+                                      'detection': self.detection, 'hazards': self.hazard})
             self.get_logger().info(f'report: {self.task}, {self.detection}, {self.hazard}',
                                    throttle_duration_sec=10.0)
 
@@ -104,15 +132,4 @@ class ToyPatrol(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = ToyPatrol()
-    executor = MultiThreadedExecutor(num_threads=4)
-    executor.add_node(node)
-    try:
-        executor.spin()
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    run(ToyPatrol, args, threads=4)

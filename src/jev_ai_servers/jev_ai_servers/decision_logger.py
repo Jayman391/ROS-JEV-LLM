@@ -9,14 +9,13 @@ import os
 import time
 from pathlib import Path
 
-import rclpy
 from jev_ai_msgs.msg import DecisionRecord, Label
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosidl_runtime_py import message_to_ordereddict
 
 from jev_ai.core.records import dumps
+from jev_ai.ros.engine import run
 
 
 class DecisionLogger(Node):
@@ -49,13 +48,4 @@ class DecisionLogger(Node):
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = DecisionLogger()
-    try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    run(DecisionLogger, args, threads=1)

@@ -13,6 +13,8 @@ def patrol(state: dict, question) -> list[float] | None:
     if question.name == 'next_action':          # continue, inspect, halt_now
         if energy.startswith('critical'):
             return [0.15, 0.05, 0.80]
+        if det and state.get('orders', 'none').startswith('converge'):
+            return [0.25, 0.70, 0.05]
         if det:
             return [0.35, 0.60, 0.05] if 'person' in state['detection'] else [0.55, 0.42, 0.03]
         return [0.90, 0.07, 0.03] if not haz else [0.70, 0.20, 0.10]
@@ -20,4 +22,9 @@ def patrol(state: dict, question) -> list[float] | None:
         return [0.10, 0.40, 0.50] if det else [0.30, 0.50, 0.20] if haz else [0.80, 0.15, 0.05]
     if question.name == 'report_now':           # true, false
         return [0.70, 0.30] if det or haz else [0.15, 0.85]
+    if question.name == 'order':                # supervisor: carry_on, converge
+        reports = state.get('reports', 'none')
+        if state.get('order', 'none') != 'none':
+            return [0.30, 0.70]                 # an order is running: keep it
+        return [0.20, 0.80] if "person" in reports else [0.85, 0.15]
     return None

@@ -369,3 +369,31 @@ class DecisionEngine:
 
 def _prio_rank(p: str) -> int:
     return ('', 'low', 'normal', 'high', 'reserved').index(p)
+
+
+def run(make_node: Callable[[], object], args=None, threads: int = 4,
+        on_exit: Callable[[object], None] | None = None) -> None:
+    """Entry-point body: spin a node on a MultiThreadedExecutor until Ctrl-C or shutdown.
+
+    Under ``ros2 launch`` Ctrl-C reaches a node twice (terminal, then launch), so the second SIGINT
+    is ignored while cleaning up instead of surfacing as a KeyboardInterrupt traceback.
+    """
+    import signal
+
+    import rclpy
+    from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+
+    rclpy.init(args=args)
+    node = make_node()
+    executor = MultiThreadedExecutor(num_threads=threads)
+    executor.add_node(node)
+    try:
+        executor.spin()
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
+    finally:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        if on_exit:
+            on_exit(node)
+        node.destroy_node()
+        rclpy.try_shutdown()

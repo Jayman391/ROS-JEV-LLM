@@ -26,20 +26,18 @@ import json
 import threading
 import uuid
 
-import rclpy
 from diagnostic_msgs.msg import KeyValue
 from jev_ai_msgs.action import Decide
 from jev_ai_msgs.msg import ClassRef, Distribution
 from jev_ai_msgs.msg import Decision as DecisionMsg
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.task import Future
 
 from jev_ai.core.catalog import load_catalog
 from jev_ai.core.fusion import confidence
-from jev_ai.ros.engine import Decision, DecisionEngine
+from jev_ai.ros.engine import Decision, DecisionEngine, run
 
 
 def to_msg(d: Decision) -> DecisionMsg:
@@ -189,15 +187,4 @@ def _classes(refs) -> dict[str, set[str]]:
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = DecideServer()
-    executor = MultiThreadedExecutor(num_threads=8)
-    executor.add_node(node)
-    try:
-        executor.spin()
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    run(DecideServer, args, threads=8)

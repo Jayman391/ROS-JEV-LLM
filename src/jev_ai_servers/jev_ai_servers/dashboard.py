@@ -18,15 +18,14 @@ import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import rclpy
 from diagnostic_msgs.msg import DiagnosticArray
 from jev_ai_msgs.msg import DecisionRecord, Label
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosidl_runtime_py import message_to_ordereddict
 
 from jev_ai.core import metrics
+from jev_ai.ros.engine import run
 from jev_ai.viz import report
 
 METRICS_TTL_S = 2.0
@@ -151,16 +150,7 @@ def _handler(node: Dashboard):
 
 
 def main(args=None):
-    rclpy.init(args=args)
-    node = Dashboard()
-    try:
-        rclpy.spin(node)
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    run(Dashboard, args, threads=1)
 
 
 if __name__ == '__main__':

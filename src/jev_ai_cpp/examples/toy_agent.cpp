@@ -38,7 +38,8 @@ private:
     const int e = static_cast<int>(energy_ + 0.5);
     const char * level = e >= 40 ? "ok" : e >= 15 ? "low" : "critical";
     return {{"task", task_}, {"energy", std::string(level) + " (" + std::to_string(e) + "%)"},
-      {"link", link_}, {"hazards", hazard_}, {"detection", detection_}};
+      {"link", link_}, {"hazards", hazard_}, {"detection", detection_},
+      {"orders", "none"}};   // ponytail: C++ agents don't take supervisor directives (A7: Python)
   }
 
   void act(const jev_ai::Decision & d)

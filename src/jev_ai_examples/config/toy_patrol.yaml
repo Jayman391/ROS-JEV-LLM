@@ -3,7 +3,7 @@ catalog_version: 1
 name: patrol
 question_sets:
   next_step:
-    state_keys: [task, energy, link, hazards, detection]
+    state_keys: [task, energy, link, hazards, detection, orders]   # orders: supervisor directive (A7)
     tick_hz: 1.0
     augment: true
     group: fleet

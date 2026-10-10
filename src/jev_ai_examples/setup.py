@@ -21,5 +21,6 @@ setup(
     description='jev_ai examples: toy_patrol',
     license='Apache-2.0',
     tests_require=['pytest'],
-    entry_points={'console_scripts': ['toy_patrol = jev_ai_examples.toy_patrol:main']},
+    entry_points={'console_scripts': ['toy_patrol = jev_ai_examples.toy_patrol:main',
+                                      'toy_supervisor = jev_ai_examples.toy_supervisor:main']},
 )

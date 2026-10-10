@@ -18,15 +18,14 @@ import statistics
 import time
 from collections import deque
 
-import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from rcl_interfaces.msg import SetParametersResult
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.lifecycle import Node as LifecycleNode
 from rclpy.lifecycle import State, TransitionCallbackReturn
 
 from jev_ai.backends import BackendError, load_backend
+from jev_ai.ros.engine import run
 from jev_ai_servers.common import AsyncLoop, Budget, CircuitBreaker, cassette_append, read_key
 
 PARAMS = {                       # generic parameters (§8, §9, §14); backend ones go under <backend>.
@@ -241,16 +240,4 @@ class _Cancelled(Exception):
 
 def spin(node_cls, args=None) -> None:
     """Entry point body for a server executable."""
-    rclpy.init(args=args)
-    node = node_cls()
-    executor = MultiThreadedExecutor(num_threads=8)
-    executor.add_node(node)
-    try:
-        executor.spin()
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        node.loop.stop()
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    run(node_cls, args, threads=8, on_exit=lambda node: node.loop.stop())

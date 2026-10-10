@@ -6,7 +6,7 @@ rclpy nodes; `from jev_ai import DecisionEngine` imports it lazily so the core s
 
 
 def __getattr__(name):
-    if name in ('DecisionEngine', 'Decision'):
+    if name in ('DecisionEngine', 'Decision', 'Hierarchy'):
         from jev_ai import ros
         return getattr(ros, name)
     raise AttributeError(name)
