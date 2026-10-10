@@ -5,7 +5,8 @@
     ros2 launch jev_ai_examples toy_patrol.launch.py agents:=1 cpp_agents:=2   # + C++ agents
     ros2 launch jev_ai_examples toy_patrol.launch.py supervisor:=true    # + A7 supervisor
     ros2 launch jev_ai_examples toy_patrol.launch.py agents:=0 bt_agents:=1   # A8 BT toy
-    # dashboard: http://localhost:8080   records: /tmp/jev_ai/toy_patrol.jsonl
+    ros2 launch jev_ai_examples toy_patrol.launch.py catalog:=calibrated.yaml   # A10 patch
+    # dashboard: http://localhost:8080   records: /tmp/jev_ai/toy_patrol.jsonl (+ -labels.jsonl)
 
 Python agents host their engine in-process; C++ agents (jev_ai_cpp toy_agent) and BT agents
 (jev_ai_bt bt_toy) reach the same engine through decide_server, which starts when they exist.
@@ -30,8 +31,10 @@ def agents(context):
     run_id = Arg('run_id').perform(context) or uuid.uuid4().hex[:12]
     n_cpp = int(Arg('cpp_agents').perform(context))
     n_bt = int(Arg('bt_agents').perform(context))
+    catalog = Arg('catalog').perform(context) or CATALOG
     nodes = [Node(package='jev_ai_examples', executable='toy_patrol', name=f'patrol_{i}',
-                  output='screen', parameters=[{'seed': i, 'run_id': run_id}])
+                  output='screen', parameters=[{'seed': i, 'run_id': run_id,
+                                                'catalog': catalog}])
              for i in range(1, n + 1)]
     nodes += [Node(package='jev_ai_cpp', executable='toy_agent', name=f'cpp_patrol_{i}',
                    output='screen', parameters=[{'seed': 100 + i}])
@@ -48,7 +51,7 @@ def agents(context):
         launch_arguments={'jev_backend': Arg('jev_backend'),
                           'llm_backend': Arg('llm_backend'),
                           'dashboard_port': Arg('dashboard_port'),
-                          'catalog': CATALOG if n_cpp or n_bt else '',
+                          'catalog': catalog if n_cpp or n_bt else '',
                           'run_id': run_id,
                           'params_file': EXAMPLES + '/config/toy_params.yaml'}.items())] + nodes
 
@@ -60,6 +63,8 @@ def generate_launch_description():
         DeclareLaunchArgument('bt_agents', default_value='0'),
         DeclareLaunchArgument('supervisor', default_value='false'),
         DeclareLaunchArgument('run_id', default_value='', description='"" = a fresh one'),
+        DeclareLaunchArgument('catalog', default_value='',
+                              description='"" = config/toy_patrol.yaml (e.g. a calibrated one)'),
         DeclareLaunchArgument('jev_backend', default_value='mock'),
         DeclareLaunchArgument('llm_backend', default_value='mock'),
         DeclareLaunchArgument('dashboard_port', default_value='8080'),

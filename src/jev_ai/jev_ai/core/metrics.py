@@ -470,18 +470,30 @@ def reliability(pairs: list[tuple[list[float], int]], bins: int = 10) -> dict:
     return {'n': n, 'ece': ece, 'nll': nll / n if n else None, 'bins': out}
 
 
-def _calibration(decs, labels):
-    """Labels join on (run_id, subject or agent, decision_id, question). ponytail: labels with
-    decision_id 0 (join by subject + time window, Label.msg) are skipped for now."""
+def label_lookup(labels):
+    """``truth(record, trace) -> true class or None``. Labels join on (run_id, subject,
+    decision_id, question), the subject being the record's subject or its agent. ponytail: labels
+    with decision_id 0 (join by subject + time window, Label.msg) are skipped for now."""
     truth = {(x.get('run_id', ''), x.get('subject', ''), int(x.get('decision_id') or 0),
               x.get('question', '')): x.get('true_class') for x in labels}
+
+    def lookup(f, t):
+        for subject in (f.get('subject'), f.get('agent', '')):
+            y = truth.get((f.get('run_id', ''), subject, int(f.get('decision_id', 0)),
+                           t.get('question', '')))
+            if y is not None:
+                return y
+        return None
+    return lookup
+
+
+def _calibration(decs, labels):
+    truth = label_lookup(labels)
     src = defaultdict(lambda: {'jev': [], 'llm': [], 'fused': []})
     for d in decs:
         f = d['final']
-        subject = f.get('subject') or f.get('agent', '')
         for t in f.get('questions') or []:
-            y = truth.get((f.get('run_id', ''), subject, int(f.get('decision_id', 0)),
-                           t.get('question', '')))
+            y = truth(f, t)
             classes = t.get('classes') or []
             if y not in classes:
                 continue

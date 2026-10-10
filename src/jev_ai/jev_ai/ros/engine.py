@@ -28,7 +28,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosidl_runtime_py import set_message_fields
 
 from jev_ai.core.catalog import Catalog, QuestionSet, load_catalog
-from jev_ai.core.commitment import Commitment, Step, TokenBucket, argmax_changed
+from jev_ai.core.commitment import Commitment, Step, TokenBucket, decision_due
 from jev_ai.core.prompt import SchemaError, context, parse_response, response_schema, \
     system_prompt
 from jev_ai.core.records import record_dict
@@ -246,11 +246,7 @@ class DecisionEngine:
         p = p or {}
         masked, required = self._masks(s)
         pol = s.qset.policy
-        cur = s.m.current
-        due = bool(s.triggers) or not p or not cur or any(
-            argmax_changed(s.last_p.get(qn), p[qn], s.qset.questions[qn].policy.argmax_margin)
-            for qn in p) or any(cur.get(qn) in m for qn, m in masked.items()) or any(
-            cur.get(qn) != c for qn, c in required.items())
+        due = decision_due(s.qset, s.triggers, p, s.last_p, s.m.current, masked, required)
         if not due or not s.state:
             if self.on_idle:
                 self.on_idle(s.qset.name)

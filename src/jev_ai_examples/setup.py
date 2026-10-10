@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='Jason Lobell',
     maintainer_email='jasonlobell123@gmail.com',
-    description='jev_ai examples: toy_patrol',
+    description="jev_ai examples: toy_patrol, supervisor, turtlesim, search episodes",
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={'console_scripts': ['toy_patrol = jev_ai_examples.toy_patrol:main',

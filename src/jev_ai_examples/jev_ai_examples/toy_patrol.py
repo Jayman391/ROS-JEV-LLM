@@ -9,7 +9,9 @@ smoke come and go, the link flickers. The app supplies what §5.1 asks of any ap
   the irreversible path that needs LLM agreement and a margin;
 - ``on_decision`` executes the selection; inspections pass a commit point after 1 s and
   complete after 4 s.
-A halted robot gets an "operator battery swap" after 8 s so the demo keeps cycling.
+A halted robot gets an "operator battery swap" after 8 s so the demo keeps cycling. The world
+itself is ``toy_world.ToyWorld``; its oracle is published as Labels on every final decision, for
+``ros2 jev calibrate`` and ``ros2 jev ope`` (A10).
 
 Hierarchy (A7): when its own ``report_now`` decision says true, the robot reports upward; a
 ``converge`` directive from the supervisor shares the target, enters the state as ``orders`` and
@@ -20,10 +22,13 @@ from __future__ import annotations
 import random
 
 from ament_index_python.packages import get_package_share_directory
+from jev_ai_msgs.msg import Label
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from jev_ai import Decision, DecisionEngine, Hierarchy
 from jev_ai.ros.engine import run
+from jev_ai_examples.toy_world import STEP_S, ToyWorld
 
 
 class ToyPatrol(Node):
@@ -32,68 +37,51 @@ class ToyPatrol(Node):
         default_catalog = get_package_share_directory('jev_ai_examples') + '/config/toy_patrol.yaml'
         catalog = self.declare_parameter('catalog', default_catalog).value
         seed = self.declare_parameter('seed', 0).value
-        self.rng = random.Random(f'{self.get_name()}:{seed}')
-        self.energy = self.rng.uniform(60, 95)
-        self.task, self.detection, self.hazard, self.link = 'patrolling', 'none', 'none', 'good'
-        self.inspect = None            # (commit_at, done_at) while inspecting
-        self.reset_at = None
-        self.orders, self.orders_until = 'none', 0.0
+        self.world = ToyWorld(random.Random(f'{self.get_name()}:{seed}'))
         # one run_id for the whole fleet: group noise is H(run_id, group, ...), so coupling (§6.3)
         # only happens between agents that share it ('' = this agent alone)
         run_id = self.declare_parameter('run_id', '').value or None
         self.engine = DecisionEngine(self, catalog, run_id=run_id, encode_state=self.encode,
-                                     mask=self.mask,
-                                     require=self.require, on_decision=self.act,
+                                     mask=lambda qs: self.world.mask(),
+                                     require=lambda qs: self.world.require(),
+                                     on_decision=self.act,
                                      all_phases=True,      # KEPT too: reports wait for final
                                      on_degraded=lambda qs: self.get_logger().warn(
                                          f'{qs}: Jev degraded, holding fallback'))
         supervisor = self.declare_parameter('supervisor', '/supervisor').value
         self.hierarchy = Hierarchy(self, engine=self.engine, qset='next_step',
                                    on_directive=self.obey, issuer_allowlist=[supervisor])
-        self.create_timer(0.5, self.step)
+        self.labels = self.create_publisher(
+            Label, 'labels', QoSProfile(depth=1000, reliability=ReliabilityPolicy.RELIABLE))
+        self.create_timer(STEP_S, self.step)
 
-    # --- the four app callbacks (§5.1) ----------------------------------------------------------
+    # --- the app callbacks (§5.1) ---------------------------------------------------------------
 
     def encode(self, qset: str) -> dict[str, str]:
-        e = round(self.energy)
-        level = 'ok' if e >= 40 else 'low' if e >= 15 else 'critical'
-        orders = self.orders if self.now() < self.orders_until else 'none'
-        return {'task': self.task, 'energy': f'{level} ({e}%)', 'link': self.link,
-                'hazards': self.hazard, 'detection': self.detection, 'orders': orders}
+        return self.world.encode(self.now())
 
     def obey(self, msg, payload: dict) -> None:
         """A supervisor directive (before the engine decides on it)."""
-        if msg.kind != 'converge' or self.task == 'halted':
-            return
-        target = str(payload.get('target', ''))
-        if self.detection == 'none' and target:
-            self.detection = target                     # shared target: inspect is unmasked
-        self.orders = f'converge on {target} (from {msg.issuer})'
-        self.orders_until = self.now() + float(payload.get('ttl_s', 15.0))
-
-    def mask(self, qset: str) -> dict[str, set[str]]:
-        return {'next_action': {'inspect'}} if self.detection == 'none' else {}
-
-    def require(self, qset: str) -> dict[str, str]:
-        return {'next_action': 'halt_now'} if self.energy <= 5 and self.task != 'halted' else {}
+        if msg.kind == 'converge':
+            self.world.converge(str(payload.get('target', '')), msg.issuer,
+                                float(payload.get('ttl_s', 15.0)), self.now())
 
     def act(self, d: Decision) -> None:
-        now = self.now()
-        action = d.selected.get('next_action') if d.act else None   # KEPT: already executing
-        if action == 'halt_now' and self.task != 'halted':
-            self.task, self.inspect, self.reset_at = 'halted', None, now + 8.0
-        elif action == 'inspect' and self.inspect is None and self.task != 'halted':
-            self.task = f'inspecting {self.detection.split(" at ")[0]}'
-            self.inspect = (now + 1.0, now + 4.0)
-        elif action == 'continue' and self.task != 'halted':
-            self.task, self.inspect = 'patrolling', None
-        if d.selected.get('report_now') == 'true' and d.final:
-            self.hierarchy.report('status', subject=self.detection,
+        w = self.world
+        w.act(d.selected.get('next_action') if d.act else None, self.now())  # KEPT: executing
+        if not d.final:
+            return
+        for question, true_class in w.oracle().items():
+            self.labels.publish(Label(run_id=self.engine.run_id, subject=self.engine.agent,
+                                      question=question, true_class=true_class,
+                                      decision_id=d.decision_id, source='toy_world'))
+        if d.selected.get('report_now') == 'true':
+            self.hierarchy.report('status', subject=w.detection,
                                   priority=float(d.values.get('urgency.level_mean', 0.0)),
                                   beliefs=d.fused, payload={
-                                      'task': self.task, 'energy': round(self.energy),
-                                      'detection': self.detection, 'hazards': self.hazard})
-            self.get_logger().info(f'report: {self.task}, {self.detection}, {self.hazard}',
+                                      'task': w.task, 'energy': round(w.energy),
+                                      'detection': w.detection, 'hazards': w.hazard})
+            self.get_logger().info(f'report: {w.task}, {w.detection}, {w.hazard}',
                                    throttle_duration_sec=10.0)
 
     # --- the simulated world ----------------------------------------------------------------------
@@ -102,33 +90,11 @@ class ToyPatrol(Node):
         return self.get_clock().now().nanoseconds * 1e-9
 
     def step(self) -> None:
-        now, r = self.now(), self.rng.random
-        if self.task == 'halted':
-            if now >= self.reset_at:
-                self.energy, self.task, self.reset_at = 100.0, 'patrolling', None
-                self.engine.trigger('battery_swapped')
-            return
-        self.energy = max(0.0, self.energy - (0.45 if self.inspect else 0.25))
-        if self.inspect:
-            commit_at, done_at = self.inspect
-            if commit_at and now >= commit_at:
-                self.engine.commit_point('next_action')
-                self.inspect = (None, done_at)
-            if now >= done_at:
-                self.inspect, self.detection, self.task = None, 'none', 'patrolling'
-                self.engine.completed('next_action')
-        if self.detection == 'none' and r() < 0.03:
-            what = 'person-like shape' if r() < 0.4 else 'debris'
-            self.detection = f'{what} at {self.rng.randint(5, 40)} m'
-            self.engine.trigger('detection', priority='high')
-        elif self.detection != 'none' and not self.inspect and r() < 0.02:
-            self.detection = 'none'
-        if self.hazard == 'none' and r() < 0.01:
-            self.hazard = 'smoke'
-            self.engine.trigger('hazard')
-        elif self.hazard != 'none' and r() < 0.05:
-            self.hazard = 'none'
-        self.link = 'weak' if r() < 0.1 else 'good'
+        for kind, *args in self.world.step(self.now()):
+            if kind == 'trigger':
+                self.engine.trigger(args[0], priority=args[1])
+            else:
+                getattr(self.engine, kind)(args[0])     # commit_point / completed
 
 
 def main(args=None):

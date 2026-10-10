@@ -9,7 +9,8 @@ the same request always gets the same answer. Parameters (ROS ``mock.<name>``):
 - ``latency_s`` (0.02): simulated latency;
 - ``fail_rate`` (0.0): seeded per-question fault injection;
 - ``rules`` (''): ``module:function`` hook ``fn(state: dict, question: JevQuestion)`` returning
-  probabilities aligned with the classes, or None to fall back to the Dirichlet. It lets example
+  probabilities aligned with the classes, a {class: probability} dict (order-free), or None to
+  fall back to the Dirichlet. It lets example
   apps make the mock behave plausibly (e.g. "battery low → return_home is likely").
 """
 from __future__ import annotations
@@ -57,6 +58,8 @@ class MockJev(JevBackend):
                 errors.append('mock: injected failure')
                 continue
             p = self.rules(state_d, q) if self.rules else None
+            if isinstance(p, dict):                 # keyed by class: survives reordering
+                p = [float(p.get(c, 0.0)) for c in q.classes]
             if p is None:
                 rng = self._rng(state, q.name, q.classes)
                 p = [rng.gammavariate(self.alpha, 1.0) for _ in q.classes]

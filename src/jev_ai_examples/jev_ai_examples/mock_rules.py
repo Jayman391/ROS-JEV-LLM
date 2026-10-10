@@ -7,7 +7,20 @@ behaves like a patrol robot rather than noise. Returning None falls back to the 
 from __future__ import annotations
 
 
-def patrol(state: dict, question) -> list[float] | None:
+# Each rule below lists probabilities in this class order; patrol() keys them by class name, so
+# the answer survives a reordered catalog (ros2 jev replay measures position bias that way).
+CLASSES = {'next_action': ['continue', 'inspect', 'halt_now'], 'urgency': ['none', 'low', 'high'],
+           'report_now': ['true', 'false'],
+           'action': ['forward', 'turn_left', 'turn_right', 'go_to_alert'],
+           'order': ['carry_on', 'converge']}
+
+
+def patrol(state: dict, question) -> dict[str, float] | None:
+    p = _rules(state, question)
+    return None if p is None else dict(zip(CLASSES[question.name], p))
+
+
+def _rules(state: dict, question) -> list[float] | None:
     det = state.get('detection', 'none') != 'none'
     haz = state.get('hazards', 'none') != 'none'
     energy = state.get('energy', '')

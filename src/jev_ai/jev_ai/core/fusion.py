@@ -195,6 +195,7 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
         raise ValueError(f'{q.name}: {len(p_jev)} probabilities for {len(names)} classes')
 
     ivec = [a in irr for a in names]
+    bias = bias if bias is not None else (list(q.bias) or None)
     c = confidence(p_jev)
     z, b = pool(p_jev, q_llm, mvec, ivec, c, llm_age_s, pol, bias)
     z_jev = pool(p_jev, None, mvec, ivec, c, 0.0, pol, bias)[0] if q_llm else z

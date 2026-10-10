@@ -2,7 +2,7 @@ from ros2cli.command import CommandExtension, add_subparsers_on_demand
 
 
 class JevCommand(CommandExtension):
-    """jev_ai: server status, one-shot decisions, metrics reports."""
+    """jev_ai: status, one-shot decisions, reports, calibration, replay, OPE and search."""
 
     def add_arguments(self, parser, cli_name):
         self._subparser = parser

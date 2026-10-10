@@ -12,6 +12,8 @@
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>jev_ai</exec_depend>
   <exec_depend>jev_ai_msgs</exec_depend>
+  <exec_depend>jev_ai_servers</exec_depend>   <!-- replay asks Jev backends in-process -->
+  <exec_depend>python3-yaml</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

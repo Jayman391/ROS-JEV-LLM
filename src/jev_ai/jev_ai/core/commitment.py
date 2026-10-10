@@ -36,6 +36,16 @@ def argmax_changed(prev: list[float] | None, new: list[float], margin: float) ->
     return a != b and new[b] - new[a] > margin
 
 
+def decision_due(qset: QuestionSet, triggers, p: dict, last_p: dict, current: dict,
+                 masked: dict, required: dict) -> bool:
+    """§5.3 decision event: an app/periodic trigger, no Jev answer or no current class yet, Jev's
+    argmax moved, or the current class became masked or differs from a require()."""
+    return bool(triggers) or not p or not current or any(
+        argmax_changed(last_p.get(qn), p[qn], qset.questions[qn].policy.argmax_margin)
+        for qn in p) or any(current.get(qn) in m for qn, m in masked.items()) or any(
+        current.get(qn) != c for qn, c in required.items())
+
+
 def augmentation_priority(triggers, min_c: float, c_low: float, pending: bool = False,
                           app_priority: str = '') -> str:
     """§7 trigger table -> the highest priority among what fired (default 'normal')."""

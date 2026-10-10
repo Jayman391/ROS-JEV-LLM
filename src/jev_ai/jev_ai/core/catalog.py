@@ -22,7 +22,9 @@ ACTS = {
 }
 DEFAULT_ACT = {NOUL: 'threshold', CHOICE: 'sample', SCORE: 'sample'}
 # Policy fields a single question may override in the catalog.
-QUESTION_OVERRIDES = {'tau', 'kappa', 'coupling', 'coupling_directive', 'argmax_margin', 'm_irrev'}
+# beta_min..eta come from `ros2 jev calibrate`, which fits them per question (§12).
+QUESTION_OVERRIDES = {'tau', 'kappa', 'coupling', 'coupling_directive', 'argmax_margin', 'm_irrev',
+                      'beta_min', 'beta_max', 'gamma', 'B', 'eta'}
 
 
 class CatalogError(ValueError):
@@ -118,6 +120,7 @@ class QuestionSpec:
     fallback: str
     policy: Policy                       # catalog policy + this question's overrides
     threshold: float = 0.5
+    bias: tuple[float, ...] = ()         # b_q per class, nats (§6.2; fitted by calibrate)
 
     @property
     def class_names(self) -> list[str]:
@@ -218,7 +221,8 @@ def _question_set(name: str, body: dict, policy: Policy) -> QuestionSet:
 
 def _question(where: str, name: str, body: dict, policy: Policy) -> QuestionSpec:
     _keys(body, where, required={'type', 'instructions'},
-          optional={'act', 'classes', 'criteria', 'fallback', 'threshold'} | QUESTION_OVERRIDES)
+          optional={'act', 'classes', 'criteria', 'fallback', 'threshold', 'bias'}
+          | QUESTION_OVERRIDES)
     qtype = TYPES.get(body['type'])
     if qtype is None:
         raise CatalogError(f'{where}.type must be one of {sorted(TYPES)}')
@@ -263,8 +267,13 @@ def _question(where: str, name: str, body: dict, policy: Policy) -> QuestionSpec
         qpolicy = policy.merged({k: body[k] for k in QUESTION_OVERRIDES if k in body})
     except CatalogError as e:
         raise CatalogError(f'{where}: {e}') from None
+    bias = body.get('bias') or {}
+    if not isinstance(bias, dict) or set(bias) - set(names) or not all(
+            isinstance(v, (int, float)) and abs(v) <= qpolicy.B for v in bias.values()):
+        raise CatalogError(f'{where}.bias must map class names to nats within ±B')
     return QuestionSpec(name=name, type=qtype, instructions=str(body['instructions']), act=act,
-                        classes=classes, fallback=fallback, policy=qpolicy, threshold=threshold)
+                        classes=classes, fallback=fallback, policy=qpolicy, threshold=threshold,
+                        bias=tuple(float(bias.get(n, 0.0)) for n in names) if bias else ())
 
 
 def _class(where: str, c) -> ClassSpec:
