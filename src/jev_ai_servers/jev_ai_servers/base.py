@@ -37,7 +37,6 @@ PARAMS = {                       # generic parameters (§8, §9, §14); backend 
     'max_retries': 1,
     'max_rps': 50.0,
     'max_tokens_per_min': 200_000.0,
-    'max_usd_per_hour': 5.0,
     'breaker_errors': 5,
     'breaker_cooldown_s': 30.0,
     'record_path': '',           # append every successful answer to this cassette (JSONL)
@@ -105,8 +104,7 @@ class BackendServer(LifecycleNode):
             self.last_error = str(e)
             self.backend = None
             return TransitionCallbackReturn.FAILURE
-        self.budget = Budget(self.p('max_rps'), self.p('max_tokens_per_min'),
-                             self.p('max_usd_per_hour'))
+        self.budget = Budget(self.p('max_rps'), self.p('max_tokens_per_min'))
         self.breaker = CircuitBreaker(self.p('breaker_errors'), self.p('breaker_cooldown_s'))
         self.setup_endpoint()
         self.get_logger().info(f'configured: backend={name} model={self.p("model") or "default"}')
@@ -228,7 +226,6 @@ class BackendServer(LifecycleNode):
             'latency_ms_p95': round(lat[int(0.95 * (len(lat) - 1))], 1) if lat else '',
             'tokens_last_min': round(self.budget.tokens_last_min),
             'usd_last_hour': round(self.budget.usd_last_hour, 4),
-            'max_usd_per_hour': self.p('max_usd_per_hour'),
         }
         status = DiagnosticStatus(level=level, name=self.get_fully_qualified_name(), message=msg,
                                   hardware_id=self.p('backend'),

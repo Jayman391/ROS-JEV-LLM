@@ -103,8 +103,7 @@ HELP = {
                                    'LLM_MISSING.'),
     'performance.tokens': ('Tokens', '', 'Jev input, LLM input and LLM output tokens.'),
     'performance.cost_usd': ('Total cost', '$', 'LLM spend over the span.'),
-    'performance.usd_per_hour': ('Cost / hour', '$/h', 'Spend rate. Compare with the server\'s '
-                                 'max_usd_per_hour budget (default $5).'),
+    'performance.usd_per_hour': ('Cost / hour', '$/h', 'Spend rate over the span.'),
     'performance.cost_series': ('Cumulative cost', '$', 'LLM spend over time.'),
     'coupling.agreement': ('Fleet agreement', '%', 'Same group, question and 5 s epoch: share '
                            'of agent pairs that picked the same class.'),

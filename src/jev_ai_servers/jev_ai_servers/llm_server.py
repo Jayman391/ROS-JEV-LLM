@@ -7,7 +7,7 @@ to delta = 0 (§11). Server params on top of base.PARAMS:
 - ``effort`` ('low'), ``max_tokens`` (1024): merged into goal options unless the goal sets them;
   ``max_tokens`` is also a ceiling on what a goal may ask for;
 - ``pricing``: JSON {model: [usd per Mtok in, usd per Mtok out]}, used when the backend does not
-  price a call itself; an unknown model is charged at the highest listed rate (warned once).
+  price a call itself; an unknown model costs $0 (warned once). Spend is reported, not capped.
 """
 from __future__ import annotations
 
@@ -63,21 +63,15 @@ class LlmServer(BackendServer):
         return GoalResponse.ACCEPT if ok else GoalResponse.REJECT
 
     def price(self, model: str, tokens_in: int, tokens_out: int) -> float:
-        """USD for a call. Exact model, else the longest priced prefix (dated ids such as
-        claude-haiku-5-5-20261001), else the most expensive priced model: an unknown model must
-        never be free, or any client could pick one and spend past max_usd_per_hour."""
+        """USD for a call (reported, not capped). Exact model, else the longest priced prefix
+        (dated ids such as claude-haiku-5-5-20261001), else $0 with a one-time warning."""
         known = [m for m in self.pricing if model == m or model.startswith(m + '-')]
-        if known:
-            usd_in, usd_out = self.pricing[max(known, key=len)]
-        else:
+        if not known:
             if model not in self._unpriced:
                 self._unpriced.add(model)
-                self.get_logger().warning(
-                    f'no pricing for model {model!r}: charged at the highest listed rate; add it '
-                    'to `pricing` (e.g. [0, 0] for a local model) or set max_usd_per_hour: 0')
-            if not self.pricing:
-                return math.inf
-            usd_in, usd_out = max(self.pricing.values(), key=lambda r: r[0] + r[1])
+                self.get_logger().warning(f'no pricing for model {model!r}: counted as $0')
+            return 0.0
+        usd_in, usd_out = self.pricing[max(known, key=len)]
         return (tokens_in * usd_in + tokens_out * usd_out) / 1e6
 
     def _execute(self, goal_handle):

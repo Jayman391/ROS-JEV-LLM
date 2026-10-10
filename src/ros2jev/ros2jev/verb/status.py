@@ -11,7 +11,7 @@ from ros2cli.verb import VerbExtension
 
 LEVEL = {0: 'OK', 1: 'WARN', 2: 'ERROR', 3: 'STALE'}
 SHOWN = ('backend', 'model', 'breaker', 'calls', 'errors', 'latency_ms_p50', 'latency_ms_p95',
-         'usd_last_hour', 'max_usd_per_hour', 'last_error')
+         'usd_last_hour', 'last_error')
 
 
 class StatusVerb(VerbExtension):

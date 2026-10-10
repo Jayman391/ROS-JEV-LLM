@@ -21,11 +21,11 @@ def read_key(env: str, key_file: str = '') -> str:
 
 
 class Budget:
-    """Sliding-window limits (§9): requests/s, tokens/min, USD/hour. 0 disables a limit."""
+    """Sliding-window limits (§9): requests/s, tokens/min (0 disables a limit). USD/hour is
+    tracked for diagnostics only; there is no spending cap (prototype)."""
 
-    def __init__(self, max_rps: float = 50, max_tokens_per_min: float = 200_000,
-                 max_usd_per_hour: float = 5.0):
-        self.max_rps, self.max_tpm, self.max_usd = max_rps, max_tokens_per_min, max_usd_per_hour
+    def __init__(self, max_rps: float = 50, max_tokens_per_min: float = 200_000):
+        self.max_rps, self.max_tpm = max_rps, max_tokens_per_min
         self._req: deque[float] = deque()
         self._tok: deque[tuple[float, float]] = deque()
         self._usd: deque[tuple[float, float]] = deque()
@@ -45,15 +45,12 @@ class Budget:
             return 'budget: max_rps'
         if self.max_tpm and self.tokens_last_min >= self.max_tpm:
             return 'budget: max_tokens_per_min'
-        if self.max_usd and self.usd_last_hour >= self.max_usd:
-            return 'budget: max_usd_per_hour'
         self._req.append(now)
         return ''
 
     def record(self, now: float, tokens: float, usd: float) -> None:
-        # Fail closed: one NaN would make every later `>= max` comparison False for an hour.
+        # Fail closed: one NaN would make every later `>= max` comparison False for a minute.
         tokens = tokens if math.isfinite(tokens) and tokens >= 0 else math.inf
-        usd = usd if math.isfinite(usd) and usd >= 0 else math.inf
         self._tok.append((now, tokens))
         self._usd.append((now, usd))
 

@@ -93,8 +93,6 @@ td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 .health .panel { padding: 10px 14px; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-size: 12.5px; margin-top: 6px; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
-.meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 6px; }
-.meter > div { height: 100%; border-radius: 3px; }
 .strip { display: flex; flex-wrap: wrap; gap: 2px; }
 .strip button { width: 12px; height: 20px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; }
 .strip button.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
@@ -432,12 +430,10 @@ const LEVEL = [['good', 'OK', '●'], ['warning', 'Warning', '▲'], ['critical'
 function renderHealth() {
   const diags = Object.values((S.data && S.data.diagnostics) || {});
   if (!diags.length) { $('health').innerHTML = ''; return; }
-  $('health').innerHTML = `<h2>Servers</h2><p class="sub">Latest /diagnostics from jev_server and llm_server: circuit breaker, latency and spend against the hourly budget.</p>
+  $('health').innerHTML = `<h2>Servers</h2><p class="sub">Latest /diagnostics from jev_server and llm_server: circuit breaker, latency and spend over the last hour.</p>
   <div class="grid health">${diags.map((d) => {
     const v = d.values || {}, lv = LEVEL[Math.min(3, Number(d.level) || 0)];
-    const spent = parseFloat(v.usd_last_hour), cap = parseFloat(v.max_usd_per_hour);
-    const share = cap > 0 && isFinite(spent) ? Math.min(1, spent / cap) : null;
-    const mcol = share === null ? 'var(--muted)' : share > 0.9 ? 'var(--critical)' : share > 0.6 ? 'var(--warning)' : 'var(--good)';
+    const spent = parseFloat(v.usd_last_hour);
     return `<div class="panel">
       <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--${lv[0]})" aria-hidden="true">${lv[2]}</span>
         <h3 class="mono">${esc(d.name)}</h3><span class="spacer"></span><span class="badge">${lv[1]}</span></div>
@@ -446,9 +442,8 @@ function renderHealth() {
         ${v.backend ? `<dt>backend</dt><dd>${esc(v.backend)} ${v.model ? '· ' + esc(v.model) : ''}</dd>` : ''}
         ${v.breaker ? `<dt>breaker</dt><dd>${esc(v.breaker.replace('_', '-'))}</dd>` : ''}
         ${v.latency_ms_p50 ? `<dt>latency</dt><dd>p50 ${ms(+v.latency_ms_p50)} · p95 ${ms(+v.latency_ms_p95)}</dd>` : ''}
-        ${share !== null ? `<dt>spend</dt><dd>${usd(spent)} of ${usd(cap)} / hour</dd>` : ''}
+        ${isFinite(spent) ? `<dt>spend</dt><dd>${usd(spent)} last hour</dd>` : ''}
       </dl>
-      ${share !== null ? `<div class="meter" data-tip="${pct(share, 0)} of the hourly budget"><div style="width:${100 * share}%;background:${mcol}"></div></div>` : ''}
     </div>`;
   }).join('')}</div>`;
 }
@@ -565,10 +560,6 @@ function kpi(key, value, ctx) {
   return `<div class="panel kpi"><div class="label">${esc(h.label || key)} ${info(key)}</div>
     <div class="value">${value}</div><div class="ctx">${ctx || '&nbsp;'}</div></div>`;
 }
-function budget() {
-  const caps = Object.values((S.data && S.data.diagnostics) || {}).map((d) => parseFloat((d.values || {}).max_usd_per_hour)).filter((x) => x > 0);
-  return caps.length ? Math.max(...caps) : 5.0;
-}
 function card(id, key, extra = '', wide = false) {
   const h = typeof key === 'string' ? help(key) : key;
   return `<div class="panel"${wide ? ' style="grid-column:1/-1"' : ''}><h2>${esc(h.label || key)} ${h.unit && h.unit !== '%' ? `<span class="muted" style="font-weight:400">(${esc(h.unit)})</span>` : ''}</h2>
@@ -589,7 +580,7 @@ function renderMetrics() {
     kpi('phases.fallback_rate', pct(ph.fallback_rate), `degraded (incl. LLM missing) ${pct(ph.degraded_rate)}`),
     kpi('augmentation.agreement', pct(au.agreement), `LLM answered ${pct(au.llm_share, 0)} of decisions`),
     kpi('augmentation.mean_abs_delta', fix(au.mean_abs_delta) + '<span class="ctx"> nats</span>', `bound B = 3.00 · argmax flipped ${pct(au.argmax_flip_rate, 0)}`),
-    kpi('performance.usd_per_hour', usd(pf.usd_per_hour), `budget ${usd(budget())}/h · total ${usd(pf.cost_usd)}`),
+    kpi('performance.usd_per_hour', usd(pf.usd_per_hour), `total ${usd(pf.cost_usd)}`),
     kpi('performance.jev_latency_ms', ms(pf.jev_latency_ms.p95), `p95 · p50 ${ms(pf.jev_latency_ms.p50)} · p99 ${ms(pf.jev_latency_ms.p99)}`),
     kpi('performance.llm_latency_ms', ms(pf.llm_latency_ms.p95), `p95 · p50 ${ms(pf.llm_latency_ms.p50)} · p99 ${ms(pf.llm_latency_ms.p99)}`),
   ].join('');

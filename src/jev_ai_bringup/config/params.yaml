@@ -7,11 +7,10 @@ jev_server:
     max_retries: 1
     max_rps: 50.0
     max_tokens_per_min: 200000.0
-    max_usd_per_hour: 5.0
     breaker_errors: 5
     breaker_cooldown_s: 30.0
     record_path: ''                # set to record a cassette for the replay backend
-    usd_per_mtok_input: 0.042      # Jev input price (output is free), for the budget
+    usd_per_mtok_input: 0.042      # Jev input price (output is free), for reported spend
     typesafe:
       model: ''                    # '' = jev-latest
       base_url: ''                 # '' = api.typesafe.ai; OpenRouter: https://openrouter.ai/api
@@ -36,7 +35,6 @@ llm_server:
     max_retries: 1
     max_rps: 10.0
     max_tokens_per_min: 200000.0
-    max_usd_per_hour: 5.0
     breaker_errors: 5
     breaker_cooldown_s: 30.0
     record_path: ''

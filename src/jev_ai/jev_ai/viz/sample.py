@@ -206,7 +206,7 @@ def diagnostics(t_wall: float = T_WALL0 + 900) -> dict:
                 'stamp': t_wall, 'values': {
                     'backend': backend, 'model': model, 'breaker': breaker,
                     'latency_ms_p50': str(p50), 'latency_ms_p95': str(p95),
-                    'usd_last_hour': str(usd), 'max_usd_per_hour': '5.0'}}
+                    'usd_last_hour': str(usd)}}
     return {'/jev_server': status('/jev_server', 0, 'ok', 'typesafe', 'jev-1.13.0', 108, 171, 0),
             '/llm_server': status('/llm_server', 1, 'circuit breaker half_open', 'anthropic',
                                   'claude-haiku-5-5', 1620, 3480, 0.61, 'half_open')}

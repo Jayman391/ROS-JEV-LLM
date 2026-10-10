@@ -132,15 +132,14 @@ def test_breaker_open_rejects_goals():
         h.close()
 
 
-def test_spend_guards_fail_closed():
+def test_pricing_ceiling_and_read_only_params():
     h = Harness(backend='mock', max_tokens=100, **{'mock.latency_s': 0.0})
     try:
         s = h.server
         haiku = s.price('claude-haiku-5-5', 10**6, 0)
+        assert haiku == 0.10
         assert s.price('claude-haiku-5-5-20261001', 10**6, 0) == haiku          # dated id
-        assert s.price('some-new-model', 10**6, 0) == s.pricing['claude-opus-5-5'][0]
-        s.pricing = {}
-        assert s.price('anything', 1, 1) == float('inf')
+        assert s.price('some-new-model', 10**6, 0) == 0.0                       # reported, no cap
 
         # a goal may lower max_tokens but never raise it past the server's ceiling
         seen = []
@@ -159,9 +158,9 @@ def test_spend_guards_fail_closed():
         res = s.set_parameters([Parameter('record_path', value='/tmp/pwn')])
         assert not res[0].successful and s.p('record_path') == ''
 
-        # a NaN cost must close the budget, not disable it
-        s.budget.record(time.monotonic(), 1, float('nan'))
-        assert s.budget.admit(time.monotonic()) == 'budget: max_usd_per_hour'
+        # spend is tracked but never refuses a call
+        s.budget.record(time.monotonic(), 1, 1e6)
+        assert s.budget.admit(time.monotonic()) == '' and s.budget.usd_last_hour >= 1e6
     finally:
         h.close()
 
