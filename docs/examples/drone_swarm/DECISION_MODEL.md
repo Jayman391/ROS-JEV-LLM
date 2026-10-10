@@ -1,6 +1,6 @@
 # Drone swarm example: decision model
 
-This is the drone swarm's use of **rosjev**. It covers the **state encoders**, the **question catalog**, how each question's output maps to actions, the triggers, the masks, and the domain-specific optimization.
+This is the drone swarm's use of **ros_jev_ai**. It covers the **state encoders**, the **question catalog**, how each question's output maps to actions, the triggers, the masks, and the domain-specific optimization.
 
 The mechanics (fusion, sampling, commitment, the LLM contract, logging and the tuning tools) are framework features specified in [FRAMEWORK.md](../../FRAMEWORK.md). This doc only configures them. The physical model is in [SYSTEM_MODEL.md](SYSTEM_MODEL.md).
 
@@ -8,8 +8,8 @@ The mechanics (fusion, sampling, commitment, the LLM contract, logging and the t
 
 | Agent | Count | Runtime | Jev | LLM | Question sets |
 |---|---|---|---|---|---|
-| `drone_agent` | N (`/uavK`) | Python `rosjev_agent.Agent` | `jev-1.13.0` | `claude-haiku-5-5`, effort `low` | `step` (1 Hz) |
-| `mission_coordinator` | 1 | Python `rosjev_agent.Agent` (supervisor) | `jev-1.13.0` | `claude-sonnet-5-5`, effort `medium` (augmentation **and** mission planning) | `global` (0.5 Hz), `track` (per item), `report` (per item), `fit` (on allocation) |
+| `drone_agent` | N (`/uavK`) | Python `ros_jev_ai_agent.Agent` | `jev-1.13.0` | `claude-haiku-5-5`, effort `low` | `step` (1 Hz) |
+| `mission_coordinator` | 1 | Python `ros_jev_ai_agent.Agent` (supervisor) | `jev-1.13.0` | `claude-sonnet-5-5`, effort `medium` (augmentation **and** mission planning) | `global` (0.5 Hz), `track` (per item), `report` (per item), `fit` (on allocation) |
 
 - **Sampling group:** `swarm` for every agent, so they all share one seed (FRAMEWORK §6.3).
 - **Epoch:**
@@ -175,8 +175,8 @@ C(d, s) = w_dist·dist(d, entry(s))/D_max + w_fit·(1 − u_fit(d, s)) + w_sw·[
 - The drone is the one with the lowest opportunity cost that is energy-feasible for the relay duration.
 
 **Tuning** uses the framework tools:
-- **Labels:** `mission_scorer` publishes `Label`s for W2 and C3 (true class per track subject), which `rosjev-calibrate` fits.
-- **Episode search:** `EpisodeRunner` = one seeded mission; J from SYSTEM_MODEL §6; run with `rosjev-search`.
+- **Labels:** `mission_scorer` publishes `Label`s for W2 and C3 (true class per track subject), which `ros-jev-ai-calibrate` fits.
+- **Episode search:** `EpisodeRunner` = one seeded mission; J from SYSTEM_MODEL §6; run with `ros-jev-ai-search`.
 
 ## 8. Example parameters (overrides of FRAMEWORK §14)
 

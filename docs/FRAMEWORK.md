@@ -1,6 +1,6 @@
-# rosjev: a System 1 / System 2 decision framework for ROS 2
+# ros_jev_ai: a System 1 / System 2 decision framework for ROS 2
 
-**rosjev** turns any ROS 2 node into a decision-making agent. The agent declares its decisions as **typed questions**, and the framework does the rest:
+**ros_jev_ai** turns any ROS 2 node into a decision-making agent. The agent declares its decisions as **typed questions**, and the framework does the rest:
 
 1. answers each question with a calibrated **Jev** model (System 1, exposed as a ROS **service**)
 2. **augments** each answer with an **LLM** (System 2, exposed as a ROS **action**)
@@ -35,27 +35,27 @@ Status: **draft for review**. ⚑ marks an open decision.
 ```
  ┌──────────────────────────── Agent node (app subclass) ────────────────────────────┐
  │  encode_state()  mask()  on_decision()            ← the app implements these three │
- │  ─────────────────────────────── runtime (rosjev_agent) ─────────────────────────── │
- │  scheduler ─ triggers ─▶ DecisionEngine (rosjev_core) ─▶ commitment state machine  │
+ │  ─────────────────────────────── runtime (ros_jev_ai_agent) ─────────────────────────── │
+ │  scheduler ─ triggers ─▶ DecisionEngine (ros_jev_ai_core) ─▶ commitment state machine  │
  │     │                    fusion · masks · sampler · rate limiter · prompt builder  │
  └─────┼──────────────────────────┼─────────────────────────────┼────────────────────┘
        │ JevDecide.srv            │ Reason.action               │ DecisionRecord
        ▼                          ▼                             ▼
- jev node (rosjev_jev)       llm node (rosjev_llm)        decision_logger (rosjev_tools)
+ jev node (ros_jev_ai_jev)       llm node (ros_jev_ai_llm)        decision_logger (ros_jev_ai_tools)
  backends: typesafe ·        backends: anthropic ·        → JSONL → calibrate · replay ·
  openrouter · mock · replay  mock · replay                  search (offline optimisation)
 ```
 
 | Package | Language | Contents | ROS? |
 |---|---|---|---|
-| `rosjev_interfaces` | IDL | msgs, srvs and actions (§3) | yes |
-| `rosjev_core` | Python | pure library: catalog loader and validator, fusion, sampler, masks, triggers, rate limiter, commitment machine, prompt/schema builder, parameter clamping | **no**, so it is unit-testable without ROS |
-| `rosjev_cpp` | C++ | header + library: the same fusion, sampler and commitment logic (parity-tested against shared golden vectors), Jev/LLM client wrappers, `rosjev::Agent` base | yes |
-| `rosjev_jev` | Python | `jev_node`: the JevDecide service server and its backends | yes |
-| `rosjev_llm` | Python | `llm_node`: the Reason action server and its backends | yes |
-| `rosjev_agent` | Python | `rosjev_agent.Agent` base node: scheduler, clients, records, the report/directive helpers | yes |
-| `rosjev_tools` | Python | `decision_logger` node; CLIs `rosjev-calibrate`, `rosjev-replay`, `rosjev-search` | partly |
-| `rosjev_examples` | Py + C++ | `toy_patrol`: a pure-Python world with Python and C++ agents and a supervisor; it verifies the framework without Gazebo | yes |
+| `ros_jev_ai_interfaces` | IDL | msgs, srvs and actions (§3) | yes |
+| `ros_jev_ai_core` | Python | pure library: catalog loader and validator, fusion, sampler, masks, triggers, rate limiter, commitment machine, prompt/schema builder, parameter clamping | **no**, so it is unit-testable without ROS |
+| `ros_jev_ai_cpp` | C++ | header + library: the same fusion, sampler and commitment logic (parity-tested against shared golden vectors), Jev/LLM client wrappers, `ros_jev_ai::Agent` base | yes |
+| `ros_jev_ai_jev` | Python | `jev_node`: the JevDecide service server and its backends | yes |
+| `ros_jev_ai_llm` | Python | `llm_node`: the Reason action server and its backends | yes |
+| `ros_jev_ai_agent` | Python | `ros_jev_ai_agent.Agent` base node: scheduler, clients, records, the report/directive helpers | yes |
+| `ros_jev_ai_tools` | Python | `decision_logger` node; CLIs `ros-jev-ai-calibrate`, `ros-jev-ai-replay`, `ros-jev-ai-search` | partly |
+| `ros_jev_ai_examples` | Py + C++ | `toy_patrol`: a pure-Python world with Python and C++ agents and a supervisor; it verifies the framework without Gazebo | yes |
 
 **Why Jev and the LLM are separate nodes instead of libraries inside the agent:**
 - **Scaling:** they scale and deploy independently, one container each.
@@ -63,7 +63,7 @@ Status: **draft for review**. ⚑ marks an open decision.
 - **Language independence:** C++ agents need no HTTP or SDK code.
 - **Recording and replay:** they can be swapped for `replay` backends, so a recorded run can be re-run deterministically.
 
-## 3. Interfaces (`rosjev_interfaces`)
+## 3. Interfaces (`ros_jev_ai_interfaces`)
 
 ```
 # msg/Question.msg
@@ -85,13 +85,13 @@ float64 confidence      # Jev confidence (choice/score); noul: |2p-1|
 
 # srv/JevDecide.srv
 string state            # JSON object
-rosjev_interfaces/Question[] questions
+ros_jev_ai_interfaces/Question[] questions
 string model            # "" = node default
 ---
 bool success
 string error
 string model            # exact version that answered
-rosjev_interfaces/Distribution[] answers
+ros_jev_ai_interfaces/Distribution[] answers
 float64 latency_ms
 uint32 input_tokens
 
@@ -120,7 +120,7 @@ string agent
 string kind             # app-defined label, e.g. a situation class
 string subject          # entity the report is about, e.g. "track:T7"
 float64 priority        # 0..1
-rosjev_interfaces/Distribution[] beliefs
+ros_jev_ai_interfaces/Distribution[] beliefs
 string payload          # JSON
 
 # msg/Directive.msg — supervisor → worker(s)
@@ -143,11 +143,11 @@ string phase            # PROVISIONAL | REVISED | COMMITTED | KEPT | FALLBACK
 string[] triggers
 string subject
 string state            # JSON as sent
-rosjev_interfaces/Distribution[] jev
-rosjev_interfaces/Distribution[] llm        # empty if no augmentation
+ros_jev_ai_interfaces/Distribution[] jev
+ros_jev_ai_interfaces/Distribution[] llm        # empty if no augmentation
 float64 llm_age_s
 float64[] beta          # per question
-rosjev_interfaces/Distribution[] fused      # after mask, before temperature
+ros_jev_ai_interfaces/Distribution[] fused      # after mask, before temperature
 string[] masked         # "question/class"
 string[] selected       # per question: class acted on ("" if none)
 float64[] tau
@@ -225,7 +225,7 @@ The loader validates the catalog at startup and the agent refuses to start if va
 **Python:**
 
 ```python
-from rosjev_agent import Agent, Decision
+from ros_jev_ai_agent import Agent, Decision
 
 class MyAgent(Agent):
     catalog = "my_pkg/catalog.yaml"
@@ -241,14 +241,14 @@ class MyAgent(Agent):
 **C++:**
 
 ```cpp
-class MyAgent : public rosjev::Agent {
-  rosjev::State encode_state(const std::string& qset) override;
-  rosjev::Mask  mask(const std::string& qset) override;
-  void on_decision(const rosjev::Decision& d) override;
+class MyAgent : public ros_jev_ai::Agent {
+  ros_jev_ai::State encode_state(const std::string& qset) override;
+  ros_jev_ai::Mask  mask(const std::string& qset) override;
+  void on_decision(const ros_jev_ai::Decision& d) override;
 };
 ```
 
-The C++ runtime does the same scheduling, fusion and commitment as Python. Shared golden vectors (`rosjev_core/test/golden/*.json`) are asserted by both pytest and gtest.
+The C++ runtime does the same scheduling, fusion and commitment as Python. Shared golden vectors (`ros_jev_ai_core/test/golden/*.json`) are asserted by both pytest and gtest.
 
 ### 5.2 Decision loop
 
@@ -364,7 +364,7 @@ All three are still LLM-augmented through π.
 - **Rate limiter:**
   - A token bucket allows k_max calls per minute per agent, with one slot reserved for `irreversible_pending`.
   - Triggers that fire while a call is in flight are coalesced into one follow-up call.
-- **Request** (built by `rosjev_core.prompt`):
+- **Request** (built by `ros_jev_ai_core.prompt`):
   - `system`: the catalog `llm.system` template, the class vocabulary with criteria, the mask semantics and the objective. It is stable per agent, so it is prompt-cached.
   - `context`: JSON with `{state, jev: {q: {class: p}, confidence}, masked, current, recent: last 3 decisions + outcomes}`.
   - `response_schema`: generated from the catalog, so the weights are typed per question and per class.
@@ -379,7 +379,7 @@ All three are still LLM-augmented through π.
   - `params` are clamped to `llm_params` bounds and exposed as `Decision.params`.
   - `flags` are forwarded in records. `option_missing` is surfaced to the app, which typically sends a Report.
 
-## 8. Jev node (`rosjev_jev`)
+## 8. Jev node (`ros_jev_ai_jev`)
 
 - **Parameters:** `backend`, `model` (pinned, e.g. `jev-1.13.0`), `timeout_s` (1.0), `max_retries` (1), `base_url`. The key comes from `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`.
 - **Backends:**
@@ -394,7 +394,7 @@ All three are still LLM-augmented through π.
 - **Concurrency:** one async client, so concurrent service calls are handled with a ReentrantCallbackGroup.
 - **Metrics:** latency, tokens and errors, published on `~/stats`.
 
-## 9. LLM node (`rosjev_llm`)
+## 9. LLM node (`ros_jev_ai_llm`)
 
 - **Parameters:** `backend`, `model` (e.g. `claude-haiku-5-5`), `effort` (`medium` is the default everywhere, `low` for high-rate workers), `max_tokens`, `timeout_s`. The key comes from `ANTHROPIC_API_KEY`.
 - **Backends:**
@@ -410,11 +410,11 @@ All three are still LLM-augmented through π.
 
 ## 10. Hierarchy: supervisors and workers
 
-- **Workers** publish `Report`s on `/rosjev/reports` (or on an app topic), typically when a `report_now` noul fires. Reports carry `beliefs`, the fused distributions, so supervisors receive calibrated uncertainty and not just labels.
+- **Workers** publish `Report`s on `/ros_jev_ai/reports` (or on an app topic), typically when a `report_now` noul fires. Reports carry `beliefs`, the fused distributions, so supervisors receive calibrated uncertainty and not just labels.
 - **Supervisors** are ordinary agents. A report or a tick triggers their question sets. They can run:
   - **per-item question sets:** one Jev request per subject (each track or report), with a focused state, issued concurrently
   - **batched augmentation:** one LLM call covering all pending items of a set
-- **Directives** go down on `/rosjev/directives`.
+- **Directives** go down on `/ros_jev_ai/directives`.
   - Each worker's runtime turns a directive into a trigger.
   - `directive_id` is the sampling epoch, so all workers answering one directive share u (§6.3).
 - **Transport:** the framework is agnostic. In apps, reports and directives can pass through a lossy relay, such as the drone example's `comms_sim`.
@@ -436,15 +436,15 @@ All three are still LLM-augmented through π.
 | N_fail (3) consecutive Jev failures | fallback class; `degraded` app callback |
 | Both systems down | fallback class held; the app decides any domain-specific failsafe |
 
-## 12. Observability and optimisation toolkit (`rosjev_tools`)
+## 12. Observability and optimisation toolkit (`ros_jev_ai_tools`)
 
 1. **`decision_logger`** subscribes to `DecisionRecord` and `Label` and writes rotating JSONL files: `runs/<run_id>/decisions.jsonl` and `labels.jsonl`.
-2. **`rosjev-calibrate`** is supervised, with no simulation needed. For questions that have `Label`s, joined on `subject` + `question`:
+2. **`ros-jev-ai-calibrate`** is supervised, with no simulation needed. For questions that have `Label`s, joined on `subject` + `question`:
    - Reports reliability (ECE, Brier) for Jev, the LLM and the fused π.
    - Fits (β_min, β_max, γ, ε), and an optional per-question Jev temperature T_J (p_J ← softmax(log p_J/T_J)), by minimising the NLL of the true class.
    - Emits a `policy:` YAML patch.
-3. **`rosjev-replay`** re-asks Jev on logged states using a variant catalog: different wording, criteria or **class order**. It reports the distribution shift and the labelled accuracy, and measures first-option bias. Cheap: Jev input costs $0.042 per million tokens and output is free.
-4. **`rosjev-search`** is episode-level policy search for unlabelled (action) questions.
+3. **`ros-jev-ai-replay`** re-asks Jev on logged states using a variant catalog: different wording, criteria or **class order**. It reports the distribution shift and the labelled accuracy, and measures first-option bias. Cheap: Jev input costs $0.042 per million tokens and output is free.
+4. **`ros-jev-ai-search`** is episode-level policy search for unlabelled (action) questions.
    - The app implements `EpisodeRunner.run(params, seed) -> Score(J, terms)`.
    - The tool runs random search with successive halving over a declared space, using common random numbers (paired seeds).
    - Output: J ± CI, component terms and $ per config.
@@ -457,10 +457,10 @@ All three are still LLM-augmented through π.
 
 ## 13. Deployment
 
-- **Image:** one `ros-jev:rosjev` image, a multi-stage build. Every node is a container whose command selects the node and whose env selects its parameters.
+- **Image:** one `ros-jev:ai` image, a multi-stage build. Every node is a container whose command selects the node and whose env selects its parameters.
 - **Discovery:** the Fast DDS Discovery Server (`discovery` service). Every container sets `ROS_DISCOVERY_SERVER`; CLI containers also set `ROS_SUPER_CLIENT=TRUE`. The same setup works in compose and k8s.
-- **Compose:** `deploy/compose/rosjev.yml` defines `x-rosjev-node` (image, env, discovery) plus `discovery` and `decision_logger`. Apps `include:` it and declare their nodes with `<<: *rosjev-node`.
-- **Kubernetes:** a kustomize **base** (`discovery`, `decision-logger`, the `rosjev-keys` Secret, a ConfigMap of catalogs and policy) plus **components**:
+- **Compose:** `deploy/compose/ros_jev_ai.yml` defines `x-ros-jev-ai-node` (image, env, discovery) plus `discovery` and `decision_logger`. Apps `include:` it and declare their nodes with `<<: *ros-jev-ai-node`.
+- **Kubernetes:** a kustomize **base** (`discovery`, `decision-logger`, the `ros-jev-ai-keys` Secret, a ConfigMap of catalogs and policy) plus **components**:
   - `jev`, `llm`, `agent`: StatefulSet templates with `replicas: N`. The pod ordinal becomes the agent name or namespace, so scaling is one command.
   - Apps overlay the components with their node commands.
 - **Keys:** only the `jev` and `llm` containers mount the API-key Secret.
@@ -488,6 +488,6 @@ All three are still LLM-augmented through π.
 
 ## 16. Open questions ⚑
 
-1. **Package prefix:** `rosjev_*`. Keep it, or choose another name?
+1. **Package prefix:** `ros_jev_ai_*`. Keep it, or choose another name?
 2. **`toy_patrol`** (a pure-Python world with no Gazebo) as the framework's test bed: is that enough for verifying phases A5–A9, or do you want a turtlesim-based visual example too?
-3. **C++ runtime scope:** the full `rosjev::Agent` parity (current plan), or only fusion, sampling and the clients, so C++ nodes call into Python agents?
+3. **C++ runtime scope:** the full `ros_jev_ai::Agent` parity (current plan), or only fusion, sampling and the clients, so C++ nodes call into Python agents?
