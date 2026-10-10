@@ -47,11 +47,11 @@ RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc
 # OpenGL visuals Gazebo needs, so the GUI runs on Xvfb and is viewed via noVNC.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         xvfb x11vnc novnc websockify libgl1-mesa-dri mesa-utils \
-        openbox xdotool openssl \
+        xdotool openssl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY docker/entrypoint.sh docker/gui-fullscreen /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/gui-fullscreen
 
 # Same environment as setup.bash, so `docker compose exec` commands can run
 # ROS tools without a login shell

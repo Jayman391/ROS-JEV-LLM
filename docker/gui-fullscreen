@@ -1,0 +1,11 @@
+#!/bin/bash
+# Resize visible Gazebo and RViz windows to fill the virtual screen.
+#
+# No window manager runs in the container, so mouse input goes straight to the
+# app. Without one, windows can't be maximized from the title bar, so this
+# script sizes them with xdotool instead.
+
+read -r W H < <(xdotool getdisplaygeometry)
+for id in $(xdotool search --onlyvisible --name "Gazebo|RViz"); do
+    xdotool windowmove "$id" 0 0 windowsize "$id" "$W" "$H"
+done

@@ -9,6 +9,10 @@
 #
 # The VNC password comes from VNC_PASSWORD if set. Otherwise a random one is
 # generated for this container start and printed to the container log.
+#
+# No window manager runs here on purpose: one captures mouse drags for window
+# moves and resizes, which blocks clicks inside Gazebo. Use gui-fullscreen to
+# size windows instead.
 
 set -e
 
@@ -27,10 +31,6 @@ export DISPLAY=:99
 
 # Give Xvfb a moment to create its socket before VNC attaches
 sleep 2
-
-# Window manager: without one, GUI windows can't be maximized and open at
-# their default size, which looks like a partial screen in noVNC
-openbox &
 
 x11vnc -display :99 -forever -shared -rfbauth "$PASSFILE" -localhost -rfbport 5900 -quiet &
 
