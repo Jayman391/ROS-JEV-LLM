@@ -13,6 +13,7 @@ The framework is built and verified first. The drone swarm is built **at the ver
 |---|---|
 | [RESEARCH.md](RESEARCH.md) | prior art, APIs, Gazebo and k8s findings |
 | [FRAMEWORK.md](FRAMEWORK.md) | **the core spec (v2)** |
+| [architecture/](architecture/README.md) | as-built architecture: system diagrams, components, data flows |
 | [REVIEW.md](REVIEW.md) | adversarial and best-practice review: 33 adopted resolutions plus decisions D1–D4 |
 | [examples/drone_swarm/SYSTEM_MODEL.md](examples/drone_swarm/SYSTEM_MODEL.md) | the example world: mission, environment, vehicle, sensors, action spaces, objectives, constraints |
 | [examples/drone_swarm/DECISION_MODEL.md](examples/drone_swarm/DECISION_MODEL.md) | the example's jev_ai configuration |
