@@ -37,11 +37,7 @@ Open a separate `docker compose exec ros2 bash` shell for each process (Gazebo, 
 ```bash
 docker compose exec ros2 ign gazebo diff_drive.sdf
 ```
-Then open **http://localhost:6080/vnc.html?resize=scale** in your browser and click **Connect**. `resize=scale` fits the virtual screen to your browser window. You'll be asked for a password. Find it in the container log, which prints it when the container starts:
-```bash
-docker compose logs ros2 | grep "noVNC password"
-```
-To choose your own password instead, set `VNC_PASSWORD` in the environment before `docker compose up -d`. The GUI window then appears after you connect. Use `-s -r` (`ign gazebo -s -r diff_drive.sdf`) for a headless server with no GUI.
+Then open **http://localhost:6080/vnc.html?resize=scale** in your browser and click **Connect**. `resize=scale` fits the virtual screen to your browser window. You'll be asked for a password, which is `password` by default (set as `VNC_PASSWORD` in the `Dockerfile`). To use a different one, change that value in the `Dockerfile` and rebuild, or set `VNC_PASSWORD` in the environment before `docker compose up -d`. The GUI window then appears after you connect. Use `-s -r` (`ign gazebo -s -r diff_drive.sdf`) for a headless server with no GUI.
 
 **ROS 2 bridge** (second shell):
 ```bash
@@ -86,7 +82,7 @@ Should print `llvmpipe` (software rendering).
 ## Troubleshooting
 
 - **noVNC page is blank or won't connect:** Check the container is up (`docker compose ps`) and that the GUI process started. The virtual display is created when the container starts, so run `docker compose restart` if it's missing.
-- **noVNC says the password is wrong:** The password is generated each time the container starts. Run `docker compose logs ros2 | grep "noVNC password"` to get the current one, or restart with `VNC_PASSWORD` set.
+- **noVNC says the password is wrong:** The password is `password` unless `VNC_PASSWORD` was changed. If you changed the `Dockerfile`, rebuild with `docker compose build` and restart with `docker compose up -d`.
 - **Gazebo window fills only part of the screen:** Double-click its title bar to maximize it (the window manager is openbox). You can also drag its corner.
 - **Gazebo GUI is slow:** Software rendering is slower than a GPU but works. Use `-s -r` for headless mode, or make the window smaller.
 - **Stale image after changing the Dockerfile:** `docker compose build --no-cache`.

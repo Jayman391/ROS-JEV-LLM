@@ -59,7 +59,8 @@ ENV AMENT_PREFIX_PATH=/opt/ros/humble \
     LD_LIBRARY_PATH=/opt/ros/humble/lib \
     PYTHONPATH=/opt/ros/humble/local/lib/python3.10/dist-packages:/opt/ros/humble/lib/python3.10/site-packages \
     PATH=/opt/ros/humble/bin:/usr/local/bin:/usr/bin:/bin \
-    DISPLAY=:99
+    DISPLAY=:99 \
+    VNC_PASSWORD=password
 
 WORKDIR /ws
 
