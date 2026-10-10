@@ -25,7 +25,8 @@ def test_beta_default_schedule(catalog):
     p = catalog.policy
     assert beta(1.0, p) == pytest.approx(0.1)        # high-confidence nondeterminism floor
     assert beta(0.0, p) == pytest.approx(1.0)
-    assert beta(0.5, p) == pytest.approx(0.55)
+    assert beta(0.5, p) == pytest.approx(0.325)      # gamma = 2
+    assert beta(confidence([0.8, 0.1, 0.1]), p) == pytest.approx(0.40, abs=0.01)
     assert beta(1.7, p) == pytest.approx(0.1)        # clamped
 
 

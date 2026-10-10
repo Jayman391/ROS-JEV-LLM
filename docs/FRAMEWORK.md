@@ -359,8 +359,10 @@ For each question set, on a tick or a trigger. Each set runs serially in its own
    │
    ├─ deterministic irreversible rule (§6.4) proposes an irreversible class?
    │      yes → hold current; request augmentation (reserved budget slot); wait ≤ T_wait
-   │            ├─ augmented & rule still holds → COMMITTED
-   │            └─ otherwise / timeout          → FALLBACK (catalog fallback; logged)
+   │            ├─ augmented & rule still holds → REVISED → COMMITTED
+   │            ├─ augmented & LLM vetoes       → re-pick among reversible classes with the
+   │            │                                 augmented logits, same noise → REVISED | KEPT
+   │            └─ timeout / no LLM weights     → FALLBACK (catalog fallback; logged)
    │
    └─ sample among reversible classes → PROVISIONAL → on_decision
           LLM result → re-fuse with same noise →
@@ -437,8 +439,8 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 ### 6.4 Irreversible classes and non-sampled acts
 
 - **Irreversible classes** (`reversible: false`, or `until_commit` after `commit_point`) are **never sampled**. A class a is chosen only if all three hold:
-  - a = argmax z;
-  - z(a) − max_{b≠a} z(b) ≥ `m_irrev` (default log 2);
+  - a = argmax z, and z(a) − max_{b≠a} z(b) ≥ `m_irrev` (default log 2), on the fused logits
+    **and** on Jev's logits alone (so the LLM can veto an irreversible class but never create one);
   - augmentation for this decision has arrived, or `require()` forced it.
 
   Otherwise it is excluded from §6.3. Real emergencies use `require()`, which is deterministic and never waits on an API.
@@ -537,7 +539,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 | Invariant | Mechanism |
 |---|---|
-| A masked class is never selected | z = −∞ after fusion; masks are recomputed before every act |
+| A masked class is never selected | z = −∞ after fusion; masks are recomputed before every act. Exception: `require()` beats `mask()` on the same class (flagged `require_overrides_mask`) |
 | Irreversible actions need System 2 input and a margin, or a deterministic `require` | §6.4, §5.3 |
 | An LLM timeout never commits an irreversible class | the timeout path is FALLBACK, and the fallback must be reversible |
 | The fallback is always executable | validated as reversible; a fallback entry returned by `mask()` is ignored with an error log (apps use `require` for real overrides) |
@@ -577,7 +579,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 | Parameter | Default | Range | Tuned by |
 |---|---|---|---|
-| `beta_min`, `beta_max`, `gamma` | 0.1, **1.0**, 1.0 | [0, 0.5], [0.5, 3], [0.5, 3] | calibrate |
+| `beta_min`, `beta_max`, `gamma` | 0.1, **1.0**, **2.0** | [0, 0.5], [0.5, 3], [0.5, 3] | calibrate |
 | `B` (LLM bound, nats), `eta` (log floor) | log 20, 1e-3 | [log 2, log 100] | calibrate |
 | `tau` | 0.5 | [0.05, 1.5] | ope |
 | `kappa` | 0.7 nats | [0, 3] | ope |

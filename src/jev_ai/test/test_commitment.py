@@ -92,12 +92,15 @@ def test_irreversible_commits_with_augmentation(qset):
     assert steps[0].traces['next_action'].irreversible_path
 
 
-def test_irreversible_falls_back_when_llm_disagrees(qset):
+def test_irreversible_vetoed_by_llm_repicks_reversible(qset):
+    """A2 decision: the LLM's advice is used to re-pick among reversible classes, not FALLBACK."""
     m = machine(qset)
-    s = m.on_event(0.0, state=STATE, p_jev=P(FAR))
+    s = m.on_event(0.0, state=STATE, p_jev=P(FAR), current={'next_action': 'inspect'})
+    assert s.selected['next_action'] == 'inspect'                       # held while pending
     steps = m.on_llm(1.0, generation=s.generation, q_llm=onehot(qset, 'continue'))
-    assert [x.phase for x in steps] == [FALLBACK]
-    assert steps[0].selected['next_action'] == 'continue'
+    assert [x.phase for x in steps] == [REVISED, COMMITTED]
+    t = steps[0].traces['next_action']
+    assert (t.selected, t.path, t.irreversible_path) == ('continue', 'sample', False)
 
 
 def test_llm_answer_without_weights_is_not_augmentation(qset):

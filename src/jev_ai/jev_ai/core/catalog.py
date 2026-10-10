@@ -35,7 +35,7 @@ class Policy:
 
     beta_min: float = 0.1
     beta_max: float = 1.0
-    gamma: float = 1.0
+    gamma: float = 2.0                   # A2 decision: LLM weight concentrates on uncertain Jev
     B: float = math.log(20)              # LLM influence bound, nats
     eta: float = 1e-3                    # log floor for LLM weights
     tau: float = 0.5

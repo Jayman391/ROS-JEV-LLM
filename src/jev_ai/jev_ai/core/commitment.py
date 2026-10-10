@@ -221,8 +221,9 @@ class Commitment:
                                 irreversible=q.irreversible(qn in self.committed_points),
                                 # only real weights for *this* question count as augmentation
                                 augmented=bool(q_llm.get(qn)), may_switch=o.may_switch[qn])
-            if prov.path == 'irreversible_pending' and t.path != 'irreversible':
-                t.selected, t.path = q.fallback, 'fallback'   # §5.3: rule no longer holds
+            if t.path == 'irreversible_pending':
+                # no LLM weights for this question: same as a timeout (§11)
+                t.selected, t.path = q.fallback, 'fallback'
                 fell_back = True
             elif q.act in SELECT_ACTS:
                 t.selected = revise_or_keep(prov, t)

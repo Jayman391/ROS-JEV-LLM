@@ -24,9 +24,10 @@ def confidence(p: list[float]) -> float:
 def beta(c: float, policy: Policy) -> float:
     """§6.2: LLM weight at Jev confidence c.
 
-    Default schedule from the spec: beta_min + (beta_max - beta_min) * (1 - c)^gamma.
+    beta_min + (beta_max - beta_min) * (1 - c)^gamma, gamma = 2 by default.
     At c=1 the LLM still gets beta_min (high-confidence nondeterminism); at c=0 it gets beta_max.
-    gamma > 1 concentrates augmentation on low-confidence decisions, gamma < 1 spreads it.
+    The entropy confidence is harsh (Jev at [.8, .1, .1] has c = 0.42), so gamma = 2 keeps the
+    LLM from dominating fairly confident Jev answers: beta = 0.40 there instead of 0.62.
     """
     c = min(1.0, max(0.0, c))
     return policy.beta_min + (policy.beta_max - policy.beta_min) * (1.0 - c) ** policy.gamma
@@ -170,7 +171,7 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
     if required:
         if required not in names:
             raise ValueError(f'{q.name}: required class {required!r} is not a class')
-        if required in masked:                     # ponytail: require() beats mask(); flagged
+        if required in masked:                     # A2 decision: require() beats mask(); flagged
             masked.discard(required)
             flags.append('require_overrides_mask')
     irr = q.irreversible() if irreversible is None else set(irreversible)

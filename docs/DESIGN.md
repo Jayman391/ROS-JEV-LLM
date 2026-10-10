@@ -103,6 +103,9 @@ docs/
 | 2026-10-10 | A1: `Decision` phases are string constants |
 | 2026-10-10 | A2 defaults: β(c) per spec; `revise_or_keep` adopts the augmented pick when it differs |
 | 2026-10-10 | A2: a revision inherits its decision event's dwell permission (dwell is checked at events only) |
-| 2026-10-10 | A2: `require()` beats `mask()` on the same class (flagged `require_overrides_mask`) |
+| 2026-10-10 | A2 (paired): `require()` beats `mask()` on the same class (flagged `require_overrides_mask`) |
+| 2026-10-10 | A2 (paired): when the LLM vetoes a pending irreversible class, re-pick among reversible classes with the augmented logits (REVISED/KEPT); FALLBACK only on timeout or missing weights |
+| 2026-10-10 | A2 (paired): default γ = 2 (entropy confidence is harsh; LLM weight concentrates on uncertain Jev) |
+| 2026-10-10 | A2 security: irreversible rule must also hold on Jev-only logits |
 | 2026-10-10 | A2: a Jev error on report-type acts (threshold/expectation/none) yields no output; noul fallback defaults to `false` |
 | 2026-10-10 | A2: the validator rejects irreversible classes with `augment: false` or with non-selecting acts |
