@@ -100,3 +100,9 @@ docs/
 | 2026-10-10 | D2: one engine; C++ and BT via `decide_server` |
 | 2026-10-10 | D3: coupling ρ per question (1.0 for directive responses, 0.5 autonomous) |
 | 2026-10-10 | D4: `llama_ros` Jev backend (local/offline) |
+| 2026-10-10 | A1: `Decision` phases are string constants |
+| 2026-10-10 | A2 defaults: β(c) per spec; `revise_or_keep` adopts the augmented pick when it differs |
+| 2026-10-10 | A2: a revision inherits its decision event's dwell permission (dwell is checked at events only) |
+| 2026-10-10 | A2: `require()` beats `mask()` on the same class (flagged `require_overrides_mask`) |
+| 2026-10-10 | A2: a Jev error on report-type acts (threshold/expectation/none) yields no output; noul fallback defaults to `false` |
+| 2026-10-10 | A2: the validator rejects irreversible classes with `augment: false` or with non-selecting acts |

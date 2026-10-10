@@ -309,6 +309,7 @@ policy: {}                             # overrides of §14
 - question types, class counts and the `act`/type combination;
 - the fallback is reversible;
 - irreversible classes are not the fallback;
+- irreversible classes only in `act: sample|argmax` questions of sets with `augment: true`;
 - `T_wait ≥ llm_timeout + 0.5 s`;
 - the encoder's keys equal `state_keys`;
 - `llm_params` bounds are valid;

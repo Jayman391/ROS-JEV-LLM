@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>jev_ai</name>
+  <version>0.1.0</version>
+  <description>jev_ai: Jev (System 1) + LLM (System 2) decision engine. jev_ai.core is pure Python; jev_ai.ros attaches it to rclpy nodes.</description>
+  <maintainer email="jasonlobell123@gmail.com">Jason Lobell</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>jev_ai_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
