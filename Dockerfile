@@ -53,6 +53,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY docker/entrypoint.sh docker/gui-fullscreen /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/gui-fullscreen
 
+# jev_ai live-backend SDKs (anthropic, typesafe) with pinned versions
+COPY src/jev_ai/requirements.txt /tmp/jev_ai-requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/jev_ai-requirements.txt
+# anyio's pytest plugin (pulled in by the SDKs) breaks Jammy's pytest 6
+ENV PYTEST_ADDOPTS="-p no:anyio"
+
 # Same environment as setup.bash, so `docker compose exec` commands can run
 # ROS tools without a login shell
 ENV AMENT_PREFIX_PATH=/opt/ros/humble \
