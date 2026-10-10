@@ -219,7 +219,8 @@ class Commitment:
                                 masked=masked.get(qn, ()), required=required.get(qn, ''),
                                 current=o.current.get(qn, ''),
                                 irreversible=q.irreversible(qn in self.committed_points),
-                                augmented=True, may_switch=o.may_switch[qn])
+                                # only real weights for *this* question count as augmentation
+                                augmented=bool(q_llm.get(qn)), may_switch=o.may_switch[qn])
             if prov.path == 'irreversible_pending' and t.path != 'irreversible':
                 t.selected, t.path = q.fallback, 'fallback'   # §5.3: rule no longer holds
                 fell_back = True

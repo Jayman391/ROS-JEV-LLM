@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import math
 import random
-import re
+import unicodedata
 from dataclasses import dataclass, field
 
 from jev_ai.core.catalog import NOUL, SCORE, QuestionSet
@@ -12,7 +12,6 @@ from jev_ai.core.catalog import NOUL, SCORE, QuestionSet
 FLAGS = ('novel_situation', 'option_missing', 'data_suspect')
 MAX_RATIONALE = 400
 _TYPE_NAME = {NOUL: 'yes/no', SCORE: 'ordered score'}
-_TAG = re.compile(r'<\s*/?\s*untrusted', re.IGNORECASE)
 
 
 class SchemaError(ValueError):
@@ -87,8 +86,13 @@ def context(qset: QuestionSet, state: list[tuple[str, str]], p_jev: dict[str, li
 
 
 def untrusted(text: str) -> str:
-    """Wrap data in delimiters; neutralise any delimiter inside it so data cannot break out."""
-    return f'<untrusted>\n{_TAG.sub("[tag removed]", text)}\n</untrusted>'
+    """Wrap data in delimiters so it cannot break out: NFKC-fold lookalikes (e.g. fullwidth ＜),
+    drop invisible format characters (zero-width joiners etc.), then escape every < and >,
+    so no tag of any spelling can appear inside the data."""
+    text = ''.join(ch for ch in unicodedata.normalize('NFKC', text)
+                   if unicodedata.category(ch) != 'Cf')
+    text = text.replace('<', '&lt;').replace('>', '&gt;')
+    return f'<untrusted>\n{text}\n</untrusted>'
 
 
 def response_schema(qset: QuestionSet) -> dict:
@@ -114,7 +118,7 @@ def parse_response(qset: QuestionSet, text: str) -> Advice:
     """Validate and normalise an LLM answer. Raises SchemaError only if it is unusable as a whole;
     per-question problems drop that question's weights (delta = 0 for it) and are reported."""
     try:
-        obj = json.loads(text)
+        obj = json.loads(text, object_pairs_hook=_no_duplicates)
     except (TypeError, ValueError) as e:
         raise SchemaError(f'not JSON: {e}') from None
     if not isinstance(obj, dict) or not isinstance(obj.get('weights'), dict):
@@ -148,6 +152,13 @@ def parse_response(qset: QuestionSet, text: str) -> Advice:
     flags = [f for f in obj.get('flags') or [] if f in FLAGS] if isinstance(obj.get('flags'), list) \
         else []
     return Advice(q_llm, params, rationale[:MAX_RATIONALE], flags, errors)
+
+
+def _no_duplicates(pairs):
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError('duplicate keys')
+    return dict(pairs)
 
 
 def _number(x) -> bool:

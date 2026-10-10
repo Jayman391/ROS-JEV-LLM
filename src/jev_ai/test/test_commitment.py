@@ -100,6 +100,16 @@ def test_irreversible_falls_back_when_llm_disagrees(qset):
     assert steps[0].selected['next_action'] == 'continue'
 
 
+def test_llm_answer_without_weights_is_not_augmentation(qset):
+    """A result that parsed but carried no weights for the question can't unlock an irreversible
+    class."""
+    m = machine(qset)
+    s = m.on_event(0.0, state=STATE, p_jev=P(FAR))
+    steps = m.on_llm(1.0, generation=s.generation, q_llm={'urgency': [0.2, 0.3, 0.5]})
+    assert [x.phase for x in steps] == [FALLBACK]
+    assert steps[0].selected['next_action'] == 'continue'
+
+
 def test_forced_and_skip(raw, qset):
     m = machine(qset)
     s = m.on_event(0.0, state=STATE, p_jev=P(FAR), required={'next_action': 'halt_now'})

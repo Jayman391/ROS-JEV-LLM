@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from dataclasses import dataclass, field
 
@@ -49,7 +50,10 @@ def pool(p_jev: list[float], q_llm: list[float] | None, masked: list[bool],
     n = len(p_jev)
     s = sum(p_jev)
     if q_llm:
-        b = beta(c, policy) * math.exp(-llm_age_s / policy.T_stale)
+        if len(q_llm) != n:
+            raise ValueError(f'{len(q_llm)} LLM weights for {n} classes')
+        # age clamped at 0: a negative age would amplify beta past beta_max
+        b = beta(c, policy) * math.exp(-max(0.0, llm_age_s) / policy.T_stale)
         ell = llm_logpref(q_llm, masked, policy.eta)
     else:
         b, ell = 0.0, [0.0] * n
@@ -78,7 +82,8 @@ def softmax(x: list[float]) -> list[float]:
 
 def unit(*parts) -> float:
     """H(parts) -> U in (0, 1): a pure, platform-independent function of logged keys."""
-    h = hashlib.sha256('\x1f'.join(map(str, parts)).encode()).digest()
+    # JSON encoding is unambiguous: no agent/group/class name can forge another key's parts.
+    h = hashlib.sha256(json.dumps([str(p) for p in parts]).encode()).digest()
     # 52 bits so that (k + 0.5) / 2^52 is exact in a double and never rounds to 0 or 1.
     return ((int.from_bytes(h[:8], 'big') >> 12) + 0.5) / 2.0 ** 52
 
@@ -187,6 +192,7 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
     ivec = [a in irr for a in names]
     c = confidence(p_jev)
     z, b = pool(p_jev, q_llm, mvec, ivec, c, llm_age_s, pol, bias)
+    z_jev = pool(p_jev, None, mvec, ivec, c, 0.0, pol, bias)[0] if q_llm else z
     t.p_jev, t.jev_confidence, t.q_llm, t.beta, t.logits = list(p_jev), c, list(q_llm or []), b, z
     t.fused = softmax(z)
 
@@ -202,20 +208,26 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
         t.values = {f'{q.name}.p_true': p_true}
         t.path = 'threshold'
     else:
-        _select(q, t, z, mvec, ivec, current, augmented, may_switch)
+        _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch)
     return t
 
 
-def _select(q, t, z, mvec, ivec, current, augmented, may_switch):
+def _wins_by(z: list[float], a: int, margin: float) -> bool:
+    """a is the argmax of z, ahead of every other class by >= margin."""
+    return all(z[a] - v >= margin for i, v in enumerate(z) if i != a)
+
+
+def _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch):
     pol, names = q.policy, q.class_names
     ci = names.index(current) if current in names else None
     cur_ok = ci is not None and not mvec[ci] and not ivec[ci]   # current is still selectable
 
-    # §6.4 irreversible rule: argmax, margin m_irrev, and augmentation; never sampled.
+    # §6.4 irreversible rule: argmax with margin m_irrev, plus augmentation; never sampled.
+    # The rule must hold on Jev alone AND after fusion: the LLM can veto an irreversible class
+    # but cannot create one (e.g. by pushing every reversible class down).
     a = max(range(len(z)), key=lambda i: z[i])
     if ivec[a]:
-        second = max((z[i] for i in range(len(z)) if i != a), default=NEG_INF)
-        if z[a] - second >= pol.m_irrev:
+        if _wins_by(z, a, pol.m_irrev) and _wins_by(z_jev, a, pol.m_irrev):
             if augmented:
                 t.selected, t.path, t.irreversible_path = names[a], 'irreversible', True
             else:   # hold the current class and wait for augmentation (§5.3)

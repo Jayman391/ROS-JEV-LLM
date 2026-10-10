@@ -155,6 +155,27 @@ def test_irreversible_rule(qset):
     assert t.selected != 'halt_now'
 
 
+def test_llm_cannot_create_an_irreversible_action(qset):
+    """Jev prefers continue; an LLM all-in on halt_now pushes the reversible classes down by
+    ~2.3 nats, which on fused logits alone would make halt_now win by > log 2."""
+    q = nxt(qset)
+    p = [0.4, 0.25, 0.35]
+    for e in range(200):
+        t = decide_question(q, p, key=key(e), q_llm=[0.0, 0.0, 1.0], augmented=True)
+        assert t.selected != 'halt_now' and not t.irreversible_path
+    z = t.logits
+    assert z[2] - max(z[0], z[1]) > math.log(2)     # the fused-only rule would have fired
+
+
+def test_llm_input_validation(catalog):
+    p = catalog.policy
+    with pytest.raises(ValueError):
+        pool([0.5, 0.5], [1.0], [False] * 2, [False] * 2, 0.0, 0.0, p)
+    _, b_neg = pool([0.5, 0.5], [0.9, 0.1], [False] * 2, [False] * 2, 0.0, -100.0, p)
+    assert b_neg == pytest.approx(beta(0.0, p))     # negative age cannot amplify beta
+    assert unit('a\x1fb') != unit('a', 'b')         # no key-separator forgery
+
+
 def test_coupling(qset):
     q = nxt(qset)
     p = [0.4, 0.35, 0.25]
