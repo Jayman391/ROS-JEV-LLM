@@ -1,0 +1,22 @@
+# jev_ai catalog template (FRAMEWORK §4). Copy, rename, and describe your own decisions.
+# Validated at startup; the engine refuses to start on any error.
+catalog_version: 1
+name: my_robot
+question_sets:
+  next_step:                       # one Jev request + at most one LLM call per decision
+    state_keys: [task, battery]    # your encode_state() must return exactly these (strings)
+    tick_hz: 1.0                   # 0 = only on triggers
+    augment: true                  # ask the LLM to augment Jev
+    group: ''                      # agents sharing a group share sampling noise (coupling)
+    questions:
+      next_action:
+        type: choice               # choice | score | noul
+        instructions: "Choose the robot's next action."
+        act: sample                # sample | argmax (choice); expectation (score); threshold (noul)
+        classes:                   # status quo first
+          - {name: continue, criteria: "Keep doing the current task.", reversible: true}
+          - {name: return_home, criteria: "Go back to base.", reversible: true}
+        fallback: continue         # must be reversible; used on timeouts and failures
+    llm:
+      system: "You are the onboard reasoning module of {agent}."
+policy: {}                         # overrides of the §14 defaults, e.g. {tau: 0.4}

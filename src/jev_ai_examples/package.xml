@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>jev_ai_examples</name>
+  <version>0.1.0</version>
+  <description>jev_ai examples: toy_patrol (simulated patrol robots deciding with Jev + LLM).</description>
+  <maintainer email="jasonlobell123@gmail.com">Jason Lobell</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>jev_ai</exec_depend>
+  <exec_depend>jev_ai_bringup</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

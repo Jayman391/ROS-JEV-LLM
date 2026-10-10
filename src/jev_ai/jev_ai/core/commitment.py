@@ -168,7 +168,7 @@ class Commitment:
                                 llm_age_s=age, masked=masked.get(qn, ()),
                                 required=required.get(qn, ''), current=cur.get(qn, ''),
                                 irreversible=q.irreversible(qn in self.committed_points),
-                                may_switch=may[qn])
+                                may_switch=may[qn], committed=self._held(qn, cur))
             if degraded and q.act in SELECT_ACTS and not t.required:
                 t.selected, t.path = q.fallback, 'degraded'
             traces[qn] = t
@@ -220,7 +220,8 @@ class Commitment:
                                 current=o.current.get(qn, ''),
                                 irreversible=q.irreversible(qn in self.committed_points),
                                 # only real weights for *this* question count as augmentation
-                                augmented=bool(q_llm.get(qn)), may_switch=o.may_switch[qn])
+                                augmented=bool(q_llm.get(qn)), may_switch=o.may_switch[qn],
+                                committed=self._held(qn, o.current))
             if t.path == 'irreversible_pending':
                 # no LLM weights for this question: same as a timeout (§11)
                 t.selected, t.path = q.fallback, 'fallback'
@@ -275,6 +276,14 @@ class Commitment:
         gen = decision.generation if decision else self.generation
         return Step(decision_id=did, generation=gen, phase=phase, selected=_selected(traces),
                     traces=traces, final=final, act=act, **meta)
+
+    def _held(self, qn: str, current: dict) -> bool:
+        """The current class is an ``until_commit`` class past commit_point(): it is kept until
+        completed() (A5 decision; masks, require and a winning irreversible class still win)."""
+        if qn not in self.committed_points:
+            return False
+        q = self.qs.questions[qn]
+        return current.get(qn) in q.irreversible(True) - q.irreversible(False)
 
     def _may_switch(self, qn: str, now: float, masked_q: set) -> bool:
         cur = self.current.get(qn)

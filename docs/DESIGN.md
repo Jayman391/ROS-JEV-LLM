@@ -62,7 +62,8 @@ docs/
 | A2 | `jev_ai.core`: catalog and validator, fusion (§6.2), Gumbel coupled selection (§6.3), irreversible rule (§6.4), commitment machine, triggers, rate limiter, prompt and schema builder; **golden vectors** | `pytest src/jev_ai` (pure, no ROS) | **you write the revise/keep rule and the β schedule** |
 | A3 | `jev_server` (lifecycle, gen-param-lib, diagnostics, budgets) + backends `mock`, `replay`, `typesafe`, `llama_ros` | launch_test with mock; `ros2 service call jev/decide …`; live with `TYPESAFE_API_KEY` | mock realism |
 | A4 | `llm_server` + backends `mock`, `replay`, `anthropic`, `openai_compat` | launch_test with mock; `ros2 action send_goal llm/reason …`; live with `ANTHROPIC_API_KEY` | augmentation prompt |
-| A5 | `DecisionEngine` (in-process) + `decision_logger` + `jev_ai_bringup` + `ros2 jev status / ask` + `toy_patrol` Python agent | `ros2 launch jev_ai_examples toy_patrol.launch.py` → records stream; kill `llm_server` → δ ≡ 0 fallback; restart → augmentation resumes | toy catalog |
+| A5 | `DecisionEngine` (in-process) + `decision_logger` + `jev_ai_bringup` + `ros2 jev status / ask` + `toy_patrol` Python agent + **live dashboard** (`dashboard` node, http://localhost:8080) | `ros2 launch jev_ai_examples toy_patrol.launch.py` → records stream and render live; kill `llm_server` → δ ≡ 0 fallback; restart → augmentation resumes | toy catalog |
+| A5.5 | **Metrics**: `jev_ai.core.metrics` over DecisionRecords (phase mix, revision/fallback rates, LLM agreement and influence, confidence, switch rate, propensities, latency, cost, coupling, calibration with labels) shown in the dashboard's Metrics tab and as a static report (`ros2 jev report`) | `ros2 jev report /tmp/jev_ai/toy_patrol.jsonl -o report.html`; numbers checked against hand-computed toy cases | which metrics matter |
 | A6 | `decide_server` + `jev_ai_cpp` clients + C++ toy agent (component) | launch_test: the C++ agent's decisions are identical to the Python engine's on golden states | C++ API ergonomics |
 | A7 | `jev_ai.hierarchy`: reports and directives, supervisor pattern, directive-epoch coupling; toy supervisor + 3 workers | directive → workers' records share the noise key; expired and duplicate directives are dropped | supervisor questions |
 | A8 | `jev_ai_bt`: `JevAsk`, `Decide`, `Reason` BT.CPP v4 nodes + BT toy | a BT toy runs a decision loop using only XML | BT port design |
@@ -109,3 +110,10 @@ docs/
 | 2026-10-10 | A2 security: irreversible rule must also hold on Jev-only logits |
 | 2026-10-10 | A2: a Jev error on report-type acts (threshold/expectation/none) yields no output; noul fallback defaults to `false` |
 | 2026-10-10 | A2: the validator rejects irreversible classes with `augment: false` or with non-selecting acts |
+| 2026-10-10 | A3–A5 shared contract: one lifecycle `BackendServer` base (keys, budget, breaker, deadline, retries, diagnostics, record cassette) for both servers; backends are entry points with pure interfaces in `jev_ai.backends`; replay backends read cassettes recorded by the servers (`record_path`) |
+| 2026-10-10 | A3–A5: plain `declare_parameter` instead of generate_parameter_library (not in the Humble image); `decision_logger` writes JSONL only (`ros2 bag record /decisions` covers rosbag2) |
+| 2026-10-10 | A4 (paired): Claude pricing per Mtok in/out — Haiku 5.5 $0.10/$0.50, Sonnet 5.5 $2/$10 (Opus 5.5 $4/$20) |
+| 2026-10-10 | A4 (paired): `openai_compat` needs no key for local endpoints: loopback, private IPs, and private hostnames (compose/k8s services, `*.local`) |
+| 2026-10-10 | A4 (paired): a model refusal or a `max_tokens` truncation gets its own error (not "invalid JSON"), and is not retried |
+| 2026-10-10 | A5 (paired): an `until_commit` class past `commit_point()` is **held** (path `committed`) until `completed()`; masks, `require`, and a *different* irreversible class winning §6.4 still override it |
+| 2026-10-10 | A5.5 added: metrics over DecisionRecords + dashboard Metrics tab + `ros2 jev report` |

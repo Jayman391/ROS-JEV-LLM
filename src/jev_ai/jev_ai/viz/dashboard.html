@@ -1,0 +1,725 @@
+<!doctype html>
+<!--
+  jev_ai decision dashboard (FRAMEWORK §3, §5.3, §6, §12; phases A5 + A5.5).
+  One self-contained page: no CDN, no web fonts, vanilla JS + inline SVG.
+  Data modes:
+    static: the <script id="jev-data"> tag holds the payload (python3 -m jev_ai.viz.report)
+    live:   the tag holds null and the page polls /api/state every second (dashboard node)
+  Payload: {mode, generated_at, records: [DecisionRecord dicts], diagnostics: {name: status},
+            metrics: jev_ai.core.metrics.compute(...)}
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jev_ai decisions</title>
+<link rel="icon" href="data:,">
+<style>
+/* ---- tokens: light, then dark (selected steps, not an automatic flip) ---- */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f3f2ee;
+  --ink: #0b0b0b; --ink-2: #52514e; --muted: #75736d;
+  --grid: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11,11,11,0.10);
+  --jev: #2a78d6; --llm: #eb6834; --fused: #1baf7a;
+  --o-COMMITTED: #2a78d6; --o-KEPT: #1baf7a; --o-REVISED: #6250d6; --o-LLM_MISSING: #eda100;
+  --o-FALLBACK: #e34948; --o-FORCED: #e87ba4; --o-OPEN: #a9a79f; --o-PROVISIONAL: #a9a79f;
+  --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --good-text: #006300;
+  --accent: #2a78d6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --surface-2: #242423;
+    --ink: #f0efec; --ink-2: #c3c2b7; --muted: #9a988f;
+    --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
+    --jev: #3987e5; --llm: #d95926; --fused: #199e70;
+    --o-COMMITTED: #3987e5; --o-KEPT: #199e70; --o-REVISED: #9085e9; --o-LLM_MISSING: #c98500;
+    --o-FALLBACK: #e66767; --o-FORCED: #d55181; --o-OPEN: #6b6a64; --o-PROVISIONAL: #6b6a64;
+    --good-text: #0ca30c; --accent: #3987e5;
+  }
+}
+
+/* ---- page ---- */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { padding: 0 16px 48px; max-width: 1280px; margin: 0 auto; overflow-x: hidden; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 16px 0 8px; }
+h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+h2 { font-size: 15px; margin: 0 0 2px; font-weight: 600; }
+h3 { font-size: 13px; margin: 0; font-weight: 600; }
+.sub { color: var(--ink-2); font-size: 12.5px; margin: 0 0 10px; }
+.muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.status { font-size: 12.5px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+.spacer { flex: 1; }
+nav { display: flex; gap: 4px; border-bottom: 1px solid var(--grid); margin-bottom: 16px; }
+nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--ink-2);
+  font: inherit; font-weight: 600; padding: 8px 12px; cursor: pointer; }
+nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis);
+  border-radius: 6px; padding: 4px 8px; }
+.panel { background: var(--surface); border-radius: 10px; box-shadow: 0 0 0 1px var(--ring);
+  padding: 14px 16px; min-width: 0; }
+.grid { display: grid; gap: 12px; }
+.cols-2 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); }
+.section { margin: 18px 0 8px; }
+.empty { color: var(--muted); padding: 24px 8px; text-align: center; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600;
+  padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink);
+  white-space: nowrap; }
+.chip { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--surface-2);
+  color: var(--ink-2); white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+.hidden { display: none !important; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); }
+th { color: var(--muted); font-weight: 600; font-size: 11.5px; }
+tbody th { width: 1%; white-space: nowrap; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.scroll-x { overflow-x: auto; }
+
+/* ---- tooltip ---- */
+#tip { position: fixed; z-index: 10; pointer-events: none; max-width: 300px; background: var(--ink);
+  color: var(--page); font-size: 12px; padding: 6px 9px; border-radius: 6px; opacity: 0;
+  transition: opacity .08s; white-space: pre-line; }
+
+/* ---- live: health, timeline, cards ---- */
+.health { grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.health .panel { padding: 10px 14px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-size: 12.5px; margin-top: 6px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 6px; }
+.meter > div { height: 100%; border-radius: 3px; }
+.strip { display: flex; flex-wrap: wrap; gap: 2px; }
+.strip button { width: 12px; height: 20px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; }
+.strip button.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+.cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+.card { cursor: pointer; text-align: left; font: inherit; color: inherit; border: 0; width: 100%;
+  display: flex; flex-direction: column; justify-content: flex-start; }
+.card:hover { box-shadow: 0 0 0 1px var(--axis); }
+.card.sel { box-shadow: 0 0 0 2px var(--accent); }
+.card .top { display: flex; align-items: center; gap: 8px; }
+.card .sels { margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-size: 12.5px; }
+.card .sels dt { color: var(--muted); } .card .sels dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---- detail ---- */
+.detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.path { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0; font-size: 12px; color: var(--muted); }
+.qgrid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); margin-top: 12px; }
+.qmeta { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 4px 0 10px; }
+.crow { display: grid; grid-template-columns: minmax(70px, 30%) 1fr; gap: 8px; align-items: center;
+  padding: 5px 0; border-top: 1px solid var(--grid); }
+.crow:first-of-type { border-top: 0; }
+.cname { font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.cname .marks { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; font-weight: 500; }
+.cname.masked { color: var(--muted); text-decoration: line-through; }
+.bars { display: grid; gap: 2px; }
+.bar { display: flex; align-items: center; gap: 6px; height: 10px; font-size: 11px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums; }
+.bar > i { display: block; height: 8px; border-radius: 0 4px 4px 0; min-width: 1px; }
+.bar.none > i { background: transparent !important; }
+.rationale { margin-top: 12px; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; font-size: 13px; }
+
+/* ---- metrics ---- */
+.kpis { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+@media (max-width: 600px) { .kpis { grid-template-columns: 1fr 1fr; } .kpi .value { font-size: 22px; } }
+.kpi { padding: 12px 14px; }
+.kpi .label { font-size: 12.5px; color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
+.kpi .value { font-size: 26px; font-weight: 650; margin: 2px 0 0; letter-spacing: -0.01em; }
+.kpi .ctx { font-size: 12px; color: var(--muted); }
+.info { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; color: var(--muted); box-shadow: inset 0 0 0 1px var(--axis); cursor: help; flex: none; }
+.chart { display: block; overflow: visible; }
+.chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .gl { stroke: var(--grid); stroke-width: 1; }
+.chart .ax { stroke: var(--axis); stroke-width: 1; }
+.chart .hit { fill: transparent; }
+.chart .hit:hover { fill: var(--ring); }
+.chart .lbl { fill: var(--ink-2); font-weight: 600; }
+.hb { display: grid; grid-template-columns: minmax(70px, 34%) 1fr; gap: 3px 10px; align-items: center; font-size: 12.5px; }
+.hb .track { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; }
+.hb .track i { display: block; height: 12px; border-radius: 0 4px 4px 0; min-width: 1px; }
+.hb .name { overflow-wrap: anywhere; }
+.qtitle { font-size: 12px; color: var(--muted); font-weight: 600; margin: 10px 0 4px; }
+.qtitle:first-child { margin-top: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>jev_ai decisions</h1>
+  <span class="status" id="status"></span>
+  <span class="spacer"></span>
+  <label class="status" for="qs-filter">Question set <select id="qs-filter"></select></label>
+</header>
+<nav role="tablist">
+  <button role="tab" id="tab-live" aria-selected="true" data-tab="live">Live decisions</button>
+  <button role="tab" id="tab-metrics" aria-selected="false" data-tab="metrics">Metrics</button>
+</nav>
+
+<main>
+  <section id="view-live">
+    <div id="health"></div>
+    <div class="section">
+      <h2>Recent decisions</h2>
+      <p class="sub">Newest on the right; one block per decision, coloured by how it ended. Click one to inspect it.</p>
+      <div class="panel"><div id="strip" class="strip"></div><div id="strip-legend" class="legend"></div></div>
+    </div>
+    <div class="section">
+      <h2>Agents</h2>
+      <p class="sub">Latest decision per agent and question set. Click a card for the full breakdown.</p>
+      <div id="cards" class="grid cards"></div>
+    </div>
+    <div class="section" id="detail-wrap"><div id="detail" class="panel"></div></div>
+  </section>
+
+  <section id="view-metrics" class="hidden">
+    <div id="kpis" class="grid kpis"></div>
+    <div id="charts" class="grid cols-2 section"></div>
+  </section>
+</main>
+<div id="tip" role="tooltip"></div>
+
+<script type="application/json" id="jev-data">null</script>
+<script>
+'use strict';
+// ======================================================================= state & helpers
+const OUTCOMES = ['COMMITTED', 'KEPT', 'REVISED', 'LLM_MISSING', 'FALLBACK', 'FORCED', 'OPEN'];
+const OUTCOME_LABEL = {COMMITTED: 'Committed (no LLM asked)', KEPT: 'Kept after LLM',
+  REVISED: 'Revised by LLM', LLM_MISSING: 'LLM missing (Jev only)', FALLBACK: 'Fallback',
+  FORCED: 'Forced by app', OPEN: 'Open / superseded'};
+const PHASE_HELP = {PROVISIONAL: 'Acted on Jev + noise; waiting for the LLM',
+  REVISED: 'LLM changed the pick', KEPT: 'LLM agreed; pick kept', COMMITTED: 'Final',
+  FALLBACK: 'Catalog fallback (timeout on irreversible, or Jev down)', FORCED: 'require() decided'};
+const S = {data: null, tab: 'live', qs: '', sel: null, pinned: null, live: false, lastOk: 0,
+           metricsStamp: null, error: ''};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
+  ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const css = (v) => `var(--${v})`;
+const oc = (o) => css('o-' + o);
+const t = (st) => st ? st.sec + st.nanosec * 1e-9 : 0;
+const wall = (r) => t(r.wall_stamp) || t(r.header && r.header.stamp);
+const isNum = (x) => typeof x === 'number' && isFinite(x);
+const pct = (x, d = 1) => isNum(x) ? (x * 100).toFixed(d) + '%' : '–';
+const fix = (x, d = 2) => isNum(x) ? x.toFixed(d) : '–';
+const ms = (x) => !isNum(x) ? '–' : x >= 1000 ? (x / 1000).toFixed(2) + ' s' : Math.round(x) + ' ms';
+const usd = (x) => !isNum(x) ? '–' : x >= 100 ? '$' + x.toFixed(0) : x >= 1 ? '$' + x.toFixed(2) : '$' + x.toFixed(3);
+const compact = (x) => !isNum(x) ? '–' : Math.abs(x) >= 1e6 ? (x / 1e6).toFixed(1) + 'M'
+  : Math.abs(x) >= 1e3 ? (x / 1e3).toFixed(1) + 'K' : String(Math.round(x * 100) / 100);
+function ago(s) {
+  if (!isNum(s)) return '–';
+  s = Math.max(0, s);
+  return s < 60 ? Math.round(s) + ' s' : s < 3600 ? Math.round(s / 60) + ' min'
+    : s < 86400 ? (s / 3600).toFixed(1) + ' h' : Math.round(s / 86400) + ' d';
+}
+const hhmm = (sec) => new Date(sec * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+const hhmmss = (sec) => new Date(sec * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+const argmax = (v) => v.reduce((b, x, i) => (isNum(x) && (b < 0 || x > v[b]) ? i : b), -1);
+function softmax(z) {
+  const f = z.map((x) => isNum(x) ? x : null), m = Math.max(...f.filter((x) => x !== null));
+  if (!isFinite(m)) return z.map(() => 1 / z.length);
+  const e = f.map((x) => x === null ? 0 : Math.exp(x - m)), s = e.reduce((a, b) => a + b, 0);
+  return e.map((x) => x / s);
+}
+function help(key) { return (S.data && S.data.metrics && S.data.metrics.help || {})[key] || {}; }
+function info(key) {
+  const h = help(key);
+  return h.desc ? `<span class="info" data-tip="${esc(h.desc)}" aria-label="${esc(h.desc)}">i</span>` : '';
+}
+
+// ======================================================================= decisions (mirrors metrics.py)
+function outcome(phases) {
+  const last = phases[phases.length - 1];
+  if (last === 'FORCED' || last === 'FALLBACK') return last;
+  if (phases.includes('REVISED')) return 'REVISED';
+  if (last === 'KEPT') return 'KEPT';
+  if (last === 'COMMITTED') return phases.includes('PROVISIONAL') ? 'LLM_MISSING' : 'COMMITTED';
+  return 'OPEN';
+}
+function decisions(records) {
+  const by = new Map();
+  for (const r of records) {
+    const k = [r.run_id, r.agent, r.question_set, r.decision_id].join('|');
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(r);
+  }
+  const out = [];
+  for (const [key, rs] of by) {
+    rs.sort((a, b) => wall(a) - wall(b));
+    out.push({key, records: rs, final: rs[rs.length - 1], outcome: outcome(rs.map((r) => r.phase)),
+              t0: wall(rs[0]), t1: wall(rs[rs.length - 1])});
+  }
+  return out.sort((a, b) => a.t0 - b.t0);
+}
+
+// ======================================================================= tooltip
+const tip = $('tip');
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest && e.target.closest('[data-tip]');
+  if (!el) { tip.style.opacity = 0; return; }
+  tip.textContent = el.getAttribute('data-tip');
+  tip.style.opacity = 1;
+});
+document.addEventListener('mousemove', (e) => {
+  if (tip.style.opacity !== '1') return;
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = e.clientY - h - 14;
+  tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+});
+
+// ======================================================================= svg chart kit
+function niceTicks(max, n = 4) {
+  if (!(max > 0)) return [0, 1];
+  const raw = max / n, p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => s >= raw);
+  const ticks = [];
+  for (let v = 0; v < max + step * 0.999; v += step) ticks.push(+v.toPrecision(12));
+  return ticks;
+}
+// Column with a 4px rounded data-end, square at the baseline.
+function col(x, y, w, h, fill, tipText) {
+  if (h <= 0) return '';
+  const r = Math.min(4, h, w / 2);
+  const d = `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+  return `<path d="${d}" fill="${fill}"${tipText ? ` data-tip="${esc(tipText)}"` : ''}/>`;
+}
+function yAxis(ticks, y, l, r, fmt) {
+  return ticks.map((v) => `<line class="gl" x1="${l}" x2="${r}" y1="${y(v)}" y2="${y(v)}"/>` +
+    `<text x="${l - 6}" y="${y(v) + 3.5}" text-anchor="end">${esc(fmt(v))}</text>`).join('');
+}
+function width(el) { return Math.max(260, el.clientWidth || 320); }
+
+// Histogram from metrics.histogram {edges, counts}. opts: color, fmtX, unit, markers [{x, label}]
+function histogram(el, hist, opts = {}) {
+  const n = hist && hist.counts ? hist.counts.reduce((a, b) => a + b, 0) : 0;
+  if (!n) { el.innerHTML = `<div class="empty">${esc(opts.empty || 'No data yet.')}</div>`; return; }
+  const W = width(el), H = 170, L = 40, R = 10, T = 14, B = 24;
+  const {edges, counts} = hist, k = counts.length, bw = (W - L - R) / k;
+  const ticks = niceTicks(Math.max(...counts)), top = ticks[ticks.length - 1];
+  const y = (v) => T + (H - T - B) * (1 - v / top), x = (v) => L + (v - edges[0]) / (edges[k] - edges[0]) * (W - L - R);
+  const fx = opts.fmtX || ((v) => fix(v, 1));
+  let s = yAxis(ticks, y, L, W - R, compact);
+  const bar = Math.min(24, Math.max(2, bw - 2));
+  counts.forEach((c, i) => {
+    const x0 = L + i * bw, tipText = `${fx(edges[i])} – ${fx(edges[i + 1])}${opts.unit || ''}\n${c} (${pct(c / n)})`;
+    s += col(x0 + (bw - bar) / 2, y(c), bar, y(0) - y(c), opts.color || css('accent'));
+    s += `<rect class="hit" x="${x0}" y="${T}" width="${bw}" height="${H - T - B}" data-tip="${esc(tipText)}"/>`;
+  });
+  s += `<line class="ax" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>`;
+  const every = Math.ceil(k / Math.max(2, Math.floor((W - L - R) / 56)));
+  for (let i = 0; i <= k; i += every)
+    s += `<text x="${x(edges[i])}" y="${H - 6}" text-anchor="middle">${esc(fx(edges[i]))}</text>`;
+  (opts.markers || []).filter((m) => isNum(m.x)).forEach((m, i) => {
+    const mx = Math.min(W - R, x(m.x));
+    s += `<line x1="${mx}" x2="${mx}" y1="${T - 4}" y2="${y(0)}" stroke="var(--ink-2)" stroke-width="1"/>` +
+      `<text class="lbl" x="${mx + 3}" y="${T - 4 + i * 12}">${esc(m.label)}</text>`;
+  });
+  el.innerHTML = `<svg class="chart" width="${W}" height="${H}" role="img" aria-label="${esc(opts.aria || 'histogram')}">${s}</svg>`;
+}
+
+// Stacked columns of outcomes per time bucket (metrics phases.over_time).
+function stacked(el, over) {
+  if (!over || !Object.keys(over.series).length) { el.innerHTML = '<div class="empty">No decisions yet.</div>'; return; }
+  const keys = OUTCOMES.filter((o) => over.series[o]);
+  const k = over.series[keys[0]].length;
+  const tot = Array.from({length: k}, (_, i) => keys.reduce((a, o) => a + over.series[o][i], 0));
+  const W = width(el), H = 190, L = 40, R = 10, T = 10, B = 24, bw = (W - L - R) / k;
+  const ticks = niceTicks(Math.max(...tot)), top = ticks[ticks.length - 1];
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  let s = yAxis(ticks, y, L, W - R, compact);
+  const bar = Math.min(24, Math.max(2, bw - 2));
+  for (let i = 0; i < k; i++) {
+    let acc = 0;
+    const x0 = L + i * bw + (bw - bar) / 2, t0 = over.t0 + i * over.bucket_s;
+    const lines = [`${hhmmss(t0)} – ${hhmmss(t0 + over.bucket_s)}: ${tot[i]} decisions`];
+    keys.forEach((o, j) => {
+      const v = over.series[o][i];
+      if (!v) return;
+      lines.push(`${OUTCOME_LABEL[o]}: ${v}`);
+      const y1 = y(acc + v), y0 = y(acc), gap = acc > 0 ? 2 : 0;   // 2px surface gap between segments
+      const isTop = keys.slice(j + 1).every((o2) => !over.series[o2][i]);
+      s += isTop ? col(x0, y1, bar, y0 - y1 - gap, oc(o))
+        : `<rect x="${x0}" y="${y1}" width="${bar}" height="${Math.max(0, y0 - y1 - gap)}" fill="${oc(o)}"/>`;
+      acc += v;
+    });
+    s += `<rect class="hit" x="${L + i * bw}" y="${T}" width="${bw}" height="${H - T - B}" data-tip="${esc(lines.join('\n'))}"/>`;
+  }
+  s += `<line class="ax" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>`;
+  const every = Math.ceil(k / Math.max(2, Math.floor((W - L - R) / 60)));
+  for (let i = 0; i < k; i += every)
+    s += `<text x="${L + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${hhmm(over.t0 + i * over.bucket_s)}</text>`;
+  el.innerHTML = `<svg class="chart" width="${W}" height="${H}" role="img" aria-label="Decisions over time by outcome">${s}</svg>`;
+}
+
+// Line with a soft area wash, end label and a hover crosshair. pts: [[t, v], ...]
+function line(el, pts, opts = {}) {
+  if (!pts || pts.length < 2) { el.innerHTML = `<div class="empty">${esc(opts.empty || 'Not enough data yet.')}</div>`; return; }
+  const W = width(el), H = 170, L = 46, R = 56, T = 12, B = 24;
+  const t0 = pts[0][0], t1 = pts[pts.length - 1][0], vmax = Math.max(...pts.map((p) => p[1]));
+  const ticks = niceTicks(vmax), top = ticks[ticks.length - 1];
+  const x = (v) => L + (t1 > t0 ? (v - t0) / (t1 - t0) : 0) * (W - L - R), y = (v) => T + (H - T - B) * (1 - v / top);
+  const fmt = opts.fmt || compact;
+  let s = yAxis(ticks, y, L, W - R, fmt);
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
+  s += `<path d="${d}L${x(t1)},${y(0)}L${x(t0)},${y(0)}Z" fill="${opts.color}" opacity="0.1"/>`;
+  s += `<path d="${d}" fill="none" stroke="${opts.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const last = pts[pts.length - 1];
+  s += `<circle cx="${x(last[0])}" cy="${y(last[1])}" r="4" fill="${opts.color}" stroke="var(--surface)" stroke-width="2"/>`;
+  s += `<text class="lbl" x="${x(last[0]) + 8}" y="${y(last[1]) + 4}">${esc(fmt(last[1]))}</text>`;
+  s += `<line class="ax" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>`;
+  [t0, (t0 + t1) / 2, t1].forEach((v, i) =>
+    s += `<text x="${x(v)}" y="${H - 6}" text-anchor="${['start', 'middle', 'end'][i]}">${hhmm(v)}</text>`);
+  s += `<line class="xh" x1="0" x2="0" y1="${T}" y2="${y(0)}" stroke="var(--ink-2)" stroke-width="1" visibility="hidden"/>`;
+  s += `<circle class="xd" r="4" fill="${opts.color}" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`;
+  s += `<rect class="ov" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>`;
+  el.innerHTML = `<svg class="chart" width="${W}" height="${H}" role="img" aria-label="${esc(opts.aria || 'line chart')}">${s}</svg>`;
+  const svg = el.querySelector('svg'), xh = svg.querySelector('.xh'), xd = svg.querySelector('.xd');
+  svg.querySelector('.ov').addEventListener('mousemove', (e) => {
+    const px = e.clientX - svg.getBoundingClientRect().left;
+    const tt = t0 + (px - L) / (W - L - R) * (t1 - t0);
+    let best = pts[0];
+    for (const p of pts) if (Math.abs(p[0] - tt) < Math.abs(best[0] - tt)) best = p;
+    xh.setAttribute('x1', x(best[0])); xh.setAttribute('x2', x(best[0])); xh.setAttribute('visibility', 'visible');
+    xd.setAttribute('cx', x(best[0])); xd.setAttribute('cy', y(best[1])); xd.setAttribute('visibility', 'visible');
+    tip.textContent = `${hhmmss(best[0])}\n${opts.label || ''} ${fmt(best[1])}`; tip.style.opacity = 1;
+  });
+  svg.querySelector('.ov').addEventListener('mouseleave', () => {
+    xh.setAttribute('visibility', 'hidden'); xd.setAttribute('visibility', 'hidden'); tip.style.opacity = 0;
+  });
+}
+
+// Reliability diagram: predicted top-class probability vs observed accuracy, per source.
+const SOURCES = [['jev', 'Jev', 'jev'], ['llm', 'LLM', 'llm'], ['fused', 'Fused', 'fused']];
+function reliability(el, cal) {
+  const W = Math.min(width(el), 420), H = Math.min(W, 300), L = 40, R = 12, T = 10, B = 30;
+  const x = (v) => L + v * (W - L - R), y = (v) => T + (H - T - B) * (1 - v);
+  let s = '';
+  [0, 0.25, 0.5, 0.75, 1].forEach((v) => {
+    s += `<line class="gl" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v}</text>`;
+    s += `<text x="${x(v)}" y="${H - 14}" text-anchor="middle">${v}</text>`;
+  });
+  s += `<text x="${(L + W - R) / 2}" y="${H}" text-anchor="middle">predicted probability of top class</text>`;
+  s += `<line x1="${x(0)}" y1="${y(0)}" x2="${x(1)}" y2="${y(1)}" stroke="var(--axis)" stroke-width="1.5"/>`;
+  for (const [k, name, c] of SOURCES) {
+    const r = cal[k];
+    if (!r || !r.n) continue;
+    const bins = r.bins.filter((b) => b.n > 0);
+    s += `<path d="${bins.map((b, i) => `${i ? 'L' : 'M'}${x(b.conf)},${y(b.acc)}`).join('')}" fill="none" stroke="${css(c)}" stroke-width="2" stroke-linejoin="round"/>`;
+    bins.forEach((b) => s += `<circle cx="${x(b.conf)}" cy="${y(b.acc)}" r="${b.n >= 10 ? 4.5 : 3}" fill="${css(c)}" stroke="var(--surface)" stroke-width="2" data-tip="${esc(`${name}: predicted ${pct(b.conf)}, right ${pct(b.acc)} of the time\n${b.n} decisions in bin ${b.lo.toFixed(1)}–${b.hi.toFixed(1)}`)}"/>`);
+  }
+  return `<svg class="chart" width="${W}" height="${H + 4}" role="img" aria-label="Reliability diagram">${s}</svg>`;
+}
+
+// HTML horizontal bars: rows [{name, value, label, tip, color}], max
+function hbars(rows, max, color) {
+  return `<div class="hb">${rows.map((r) => `<div class="name">${esc(r.name)}</div>
+    <div class="track" data-tip="${esc(r.tip || '')}"><i style="width:${max > 0 ? Math.max(0.5, 100 * r.value / max) * 0.7 : 0}%;background:${r.color || color}"></i>${esc(r.label)}</div>`).join('')}</div>`;
+}
+function legend(items) {
+  return `<div class="legend">${items.map(([c, l]) => `<span><i class="sw" style="background:${c}"></i>${esc(l)}</span>`).join('')}</div>`;
+}
+
+// ======================================================================= live tab
+const LEVEL = [['good', 'OK', '●'], ['warning', 'Warning', '▲'], ['critical', 'Error', '■'], ['muted', 'Stale', '○']];
+function renderHealth() {
+  const diags = Object.values((S.data && S.data.diagnostics) || {});
+  if (!diags.length) { $('health').innerHTML = ''; return; }
+  $('health').innerHTML = `<h2>Servers</h2><p class="sub">Latest /diagnostics from jev_server and llm_server: circuit breaker, latency and spend against the hourly budget.</p>
+  <div class="grid health">${diags.map((d) => {
+    const v = d.values || {}, lv = LEVEL[Math.min(3, Number(d.level) || 0)];
+    const spent = parseFloat(v.usd_last_hour), cap = parseFloat(v.max_usd_per_hour);
+    const share = cap > 0 && isFinite(spent) ? Math.min(1, spent / cap) : null;
+    const mcol = share === null ? 'var(--muted)' : share > 0.9 ? 'var(--critical)' : share > 0.6 ? 'var(--warning)' : 'var(--good)';
+    return `<div class="panel">
+      <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--${lv[0]})" aria-hidden="true">${lv[2]}</span>
+        <h3 class="mono">${esc(d.name)}</h3><span class="spacer"></span><span class="badge">${lv[1]}</span></div>
+      <div class="muted" style="font-size:12.5px">${esc(d.message)}</div>
+      <dl class="kv">
+        ${v.backend ? `<dt>backend</dt><dd>${esc(v.backend)} ${v.model ? '· ' + esc(v.model) : ''}</dd>` : ''}
+        ${v.breaker ? `<dt>breaker</dt><dd>${esc(v.breaker.replace('_', '-'))}</dd>` : ''}
+        ${v.latency_ms_p50 ? `<dt>latency</dt><dd>p50 ${ms(+v.latency_ms_p50)} · p95 ${ms(+v.latency_ms_p95)}</dd>` : ''}
+        ${share !== null ? `<dt>spend</dt><dd>${usd(spent)} of ${usd(cap)} / hour</dd>` : ''}
+      </dl>
+      ${share !== null ? `<div class="meter" data-tip="${pct(share, 0)} of the hourly budget"><div style="width:${100 * share}%;background:${mcol}"></div></div>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function nowRef(decs) {
+  return S.live ? Date.now() / 1000 : Math.max(0, ...decs.map((d) => d.t1));
+}
+
+function renderLive() {
+  const all = decisions((S.data && S.data.records) || []);
+  const decs = S.qs ? all.filter((d) => d.final.question_set === S.qs) : all;
+  renderHealth();
+  if (!decs.length) {
+    $('strip').innerHTML = '<div class="empty">No decisions yet. Start an engine (or set the dashboard\'s records_path to a JSONL log) and they will appear here.</div>';
+    $('strip-legend').innerHTML = ''; $('cards').innerHTML = ''; $('detail-wrap').classList.add('hidden');
+    return;
+  }
+  const now = nowRef(decs);
+  // timeline strip
+  const last = decs.slice(-100);
+  $('strip').innerHTML = last.map((d) => {
+    const f = d.final, sel = Object.entries(selections(f)).map(([q, c]) => `${q}: ${c}`).join('\n');
+    return `<button style="background:${oc(d.outcome)}" class="${S.pinned === d.key ? 'sel' : ''}" data-key="${esc(d.key)}"
+      aria-label="${esc(f.agent + ' ' + d.outcome)}" data-tip="${esc(`${f.agent} · ${f.question_set} #${f.decision_id}\n${OUTCOME_LABEL[d.outcome]} · ${ago(now - d.t1)} ago\n${sel}`)}"></button>`;
+  }).join('');
+  const seen = new Set(last.map((d) => d.outcome));
+  $('strip-legend').innerHTML = legend(OUTCOMES.filter((o) => seen.has(o)).map((o) => [oc(o), OUTCOME_LABEL[o]])).replace(/^<div class="legend">|<\/div>$/g, '');
+  // cards: latest decision per (agent, question set)
+  const latest = new Map();
+  for (const d of decs) latest.set(d.final.agent + '|' + d.final.question_set, d);
+  const keys = [...latest.keys()].sort();
+  if (!S.sel || !latest.has(S.sel)) S.sel = S.pinned ? S.sel : keys[0];
+  $('cards').innerHTML = keys.map((k) => {
+    const d = latest.get(k), f = d.final, ph = f.phase;
+    return `<button class="panel card ${!S.pinned && S.sel === k ? 'sel' : ''}" data-card="${esc(k)}">
+      <div class="top"><h3>${esc(f.agent)}</h3><span class="muted" style="font-size:12px">${esc(f.question_set)}</span>
+        <span class="spacer"></span><span class="badge" data-tip="${esc(PHASE_HELP[ph] || '')}"><i class="dot" style="background:${oc(ph)}"></i>${esc(ph)}</span></div>
+      <dl class="sels">${Object.entries(selections(f)).map(([q, c]) => `<dt>${esc(q)}</dt><dd>${esc(c)}</dd>`).join('')}</dl>
+      <div class="muted" style="font-size:12px;margin-top:6px">#${esc(f.decision_id)} · ${OUTCOME_LABEL[d.outcome]} · ${ago(now - d.t1)} ago</div>
+    </button>`;
+  }).join('');
+  const pinned = S.pinned && all.find((d) => d.key === S.pinned);
+  renderDetail(pinned || latest.get(S.sel), now);
+}
+function selections(r) {
+  const out = {};
+  for (const q of r.questions || []) if (q.selected) out[q.question] = q.selected;
+  return out;
+}
+
+function renderDetail(d, now) {
+  $('detail-wrap').classList.toggle('hidden', !d);
+  if (!d) return;
+  const f = d.final;
+  const path = d.records.map((r, i) => `${i ? '<span aria-hidden="true">→</span>' : ''}<span class="badge" data-tip="${esc(PHASE_HELP[r.phase] || '')}"><i class="dot" style="background:${oc(r.phase)}"></i>${esc(r.phase)}</span>${i ? `<span>+${(wall(r) - d.t0).toFixed(1)} s</span>` : ''}`).join(' ');
+  let params = {};
+  try { params = JSON.parse(f.llm_params || '{}'); } catch (e) { params = {}; }
+  const llmRec = d.records.find((r) => r.llm_model) || f;
+  $('detail').innerHTML = `
+    <div class="detail-head"><h2>${esc(f.agent)} · ${esc(f.question_set)} · decision #${esc(f.decision_id)}</h2>
+      <span class="chip">gen ${esc(f.generation)}</span><span class="chip">group ${esc(f.group || '–')}</span>
+      <span class="spacer"></span><span class="muted" style="font-size:12px">${hhmmss(d.t1)} · ${ago(now - d.t1)} ago</span>
+      ${S.pinned ? '<button class="chip" id="unpin" style="cursor:pointer;border:0">follow latest</button>' : ''}</div>
+    <div class="path">${path}</div>
+    <div class="qmeta">${(f.triggers || []).map((x) => `<span class="chip">trigger: ${esc(x)}</span>`).join('')}
+      ${f.jev_model ? `<span class="chip">Jev ${esc(f.jev_model)} · ${ms(f.jev_latency_ms)}</span>` : ''}
+      ${llmRec.llm_model ? `<span class="chip">LLM ${esc(llmRec.llm_model)} · ${ms(llmRec.llm_latency_ms)} · ${usd(llmRec.cost_usd)}</span>` : '<span class="chip">no LLM answer</span>'}</div>
+    ${legend([[css('jev'), 'Jev p'], [css('llm'), 'LLM q'], [css('fused'), 'Fused (softmax of logits)']])}
+    <div class="grid qgrid">${(f.questions || []).map(questionBlock).join('')}</div>
+    ${f.llm_rationale || (f.llm_flags || []).length || Object.keys(params).length ? `<div class="rationale">
+      ${f.llm_rationale ? `<div><b>LLM rationale.</b> ${esc(f.llm_rationale)}</div>` : ''}
+      ${(f.llm_flags || []).length ? `<div style="margin-top:4px">${f.llm_flags.map((x) => `<span class="badge">⚑ ${esc(x)}</span>`).join(' ')}</div>` : ''}
+      ${Object.keys(params).length ? `<div class="mono" style="margin-top:4px">params ${esc(JSON.stringify(params))}</div>` : ''}</div>` : ''}
+    ${(f.state || []).length ? `<div class="qtitle" style="margin-top:12px">State</div><div class="scroll-x"><table><tbody>${f.state.map((kv) => `<tr><th>${esc(kv.key)}</th><td>${esc(kv.value)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+  const up = $('unpin');
+  if (up) up.onclick = () => { S.pinned = null; renderLive(); };
+}
+
+function questionBlock(q) {
+  const p = q.p_jev || [], ql = q.q_llm || [], fz = (q.logits || []).length ? softmax(q.logits) : [];
+  const ps = p.reduce((a, b) => a + (b || 0), 0) || 1, qs = ql.reduce((a, b) => a + (b || 0), 0) || 1;
+  const jevTop = argmax(p);
+  const bar = (v, c, name) => isNum(v) ? `<div class="bar" data-tip="${esc(name)}: ${pct(v)}"><i style="width:${Math.max(0.5, v * 78)}%;background:${css(c)}"></i>${pct(v, 0)}</div>`
+    : '<div class="bar none"><i></i><span class="muted">–</span></div>';
+  const rows = (q.classes || []).map((c, i) => {
+    const masked = (q.masked || [])[i], marks = [];
+    if (q.selected === c) marks.push('<span class="badge" style="background:var(--accent);color:#fff">✓ selected</span>');
+    if (q.required === c) marks.push('<span class="badge">required</span>');
+    if (masked) marks.push('<span class="badge">masked</span>');
+    if (i === jevTop) marks.push('<span class="chip" data-tip="Jev\'s top class">Jev top</span>');
+    return `<div class="crow"><div class="cname ${masked ? 'masked' : ''}">${esc(c)}<div class="marks">${marks.join('')}</div></div>
+      <div class="bars">${bar(p.length ? p[i] / ps : null, 'jev', 'Jev')}${ql.length ? bar(ql[i] / qs, 'llm', 'LLM') : ''}${bar(fz.length ? fz[i] : null, 'fused', 'Fused')}</div></div>`;
+  }).join('');
+  const chips = [
+    `<span class="chip" data-tip="Jev confidence c = 1 − H(p)/log|A|">c ${fix(q.jev_confidence)}</span>`,
+    `<span class="chip" data-tip="Effective LLM weight β (0 = no LLM influence)">β ${fix(q.beta)}</span>`,
+    `<span class="chip" data-tip="Probability the sampler gave this pick (for off-policy evaluation)">propensity ${fix(q.propensity)}</span>`,
+    `<span class="chip" data-tip="Temperature τ and status-quo bonus κ">τ ${fix(q.tau)} · κ ${fix(q.kappa)}</span>`,
+    q.group_noise ? '<span class="chip" data-tip="Used the group\'s shared Gumbel noise (coupled with the fleet)">group noise</span>' : '',
+    q.irreversible_path ? '<span class="badge" style="color:var(--critical)" data-tip="Chosen by the irreversible rule: margin on Jev and fused logits plus augmentation">⚠ irreversible</span>' : '',
+    ql.length && isNum(q.llm_age_s) && q.llm_age_s > 0 ? `<span class="chip">LLM age ${q.llm_age_s.toFixed(1)} s</span>` : '',
+  ].join('');
+  return `<div><h3>${esc(q.question)}</h3><div class="qmeta">${chips}</div>${rows}</div>`;
+}
+
+// ======================================================================= metrics tab
+function section() {
+  const M = S.data && S.data.metrics;
+  if (!M) return null;
+  return S.qs ? (M.by_question_set || {})[S.qs] : M.overall;
+}
+function kpi(key, value, ctx) {
+  const h = help(key);
+  return `<div class="panel kpi"><div class="label">${esc(h.label || key)} ${info(key)}</div>
+    <div class="value">${value}</div><div class="ctx">${ctx || '&nbsp;'}</div></div>`;
+}
+function budget() {
+  const caps = Object.values((S.data && S.data.diagnostics) || {}).map((d) => parseFloat((d.values || {}).max_usd_per_hour)).filter((x) => x > 0);
+  return caps.length ? Math.max(...caps) : 5.0;
+}
+function card(id, key, extra = '', wide = false) {
+  const h = typeof key === 'string' ? help(key) : key;
+  return `<div class="panel"${wide ? ' style="grid-column:1/-1"' : ''}><h2>${esc(h.label || key)} ${h.unit && h.unit !== '%' ? `<span class="muted" style="font-weight:400">(${esc(h.unit)})</span>` : ''}</h2>
+    <p class="sub">${esc(h.desc || '')}</p>${extra}<div id="${id}"></div></div>`;
+}
+
+function renderMetrics() {
+  const m = section();
+  if (!m || !m.volume || !m.volume.decisions) {
+    $('kpis').innerHTML = ''; $('charts').innerHTML = '<div class="panel empty">No decisions yet — metrics appear once records arrive.</div>';
+    return;
+  }
+  const ph = m.phases, au = m.augmentation, pf = m.performance, oc_ = ph.outcomes;
+  const augmented = (oc_.REVISED || 0) + (oc_.KEPT || 0);
+  $('kpis').innerHTML = [
+    kpi('volume.decisions_per_min', fix(m.volume.decisions_per_min, 1), `${compact(m.volume.decisions)} decisions · ${m.volume.agents} agents · ${ago(m.volume.span_s)}`),
+    kpi('phases.revision_rate', pct(ph.revision_rate), `${oc_.REVISED || 0} of ${augmented} augmented decisions`),
+    kpi('phases.fallback_rate', pct(ph.fallback_rate), `degraded (incl. LLM missing) ${pct(ph.degraded_rate)}`),
+    kpi('augmentation.agreement', pct(au.agreement), `LLM answered ${pct(au.llm_share, 0)} of decisions`),
+    kpi('augmentation.mean_abs_delta', fix(au.mean_abs_delta) + '<span class="ctx"> nats</span>', `bound B = 3.00 · argmax flipped ${pct(au.argmax_flip_rate, 0)}`),
+    kpi('performance.usd_per_hour', usd(pf.usd_per_hour), `budget ${usd(budget())}/h · total ${usd(pf.cost_usd)}`),
+    kpi('performance.jev_latency_ms', ms(pf.jev_latency_ms.p95), `p95 · p50 ${ms(pf.jev_latency_ms.p50)} · p99 ${ms(pf.jev_latency_ms.p99)}`),
+    kpi('performance.llm_latency_ms', ms(pf.llm_latency_ms.p95), `p95 · p50 ${ms(pf.llm_latency_ms.p50)} · p99 ${ms(pf.llm_latency_ms.p99)}`),
+  ].join('');
+
+  const tot = Object.values(oc_).reduce((a, b) => a + b, 0);
+  const outLegend = legend(OUTCOMES.filter((o) => oc_[o]).map((o) => [oc(o), `${OUTCOME_LABEL[o]} ${pct(oc_[o] / tot, 0)}`]));
+  const cal = m.calibration;
+  $('charts').innerHTML = [
+    card('c-time', 'phases.over_time', outLegend),
+    card('c-beta', 'augmentation.beta', `<div class="legend"><span>mean β ${fix(au.beta_mean)} · LLM changed the pick in ${pct(au.changed_selection_rate, 0)} of augmented decisions</span></div>`),
+    card('c-conf', 'jev.confidence', `<div class="legend"><span>mean ${fix(m.jev.confidence_mean)} · Jev's first option on top ${pct(m.jev.first_option_rate, 0)} of the time</span></div>`),
+    card('c-sel', 'jev.selection'),
+    card('c-jlat', 'performance.jev_latency_ms'),
+    card('c-llat', 'performance.llm_latency_ms'),
+    card('c-cost', 'performance.cost_series'),
+    card('c-prop', 'behaviour.propensity', `<div class="legend"><span>below 0.05: ${pct(m.behaviour.low_propensity_share)} · switches ${fix(m.behaviour.switch_rate)} per agent-minute · irreversible commits ${m.behaviour.irreversible}</span></div>`),
+    card('c-coup', 'coupling.agreement'),
+    card('c-qtab', {label: 'Per question', desc: 'Agreement, LLM nudge and Jev bias per question. Hover a column header for its meaning.'}),
+    card('c-cal', 'calibration', '', true),
+  ].join('');
+
+  stacked($('c-time'), ph.over_time);
+  histogram($('c-beta'), au.beta, {color: css('llm'), fmtX: (v) => v.toFixed(1), empty: 'No LLM answers yet.', aria: 'LLM weight histogram'});
+  histogram($('c-conf'), m.jev.confidence, {color: css('jev'), fmtX: (v) => v.toFixed(1), aria: 'Jev confidence histogram'});
+  const jl = pf.jev_latency_ms, ll = pf.llm_latency_ms;
+  histogram($('c-jlat'), jl.hist, {color: css('jev'), fmtX: (v) => Math.round(v), unit: ' ms', empty: 'No Jev calls yet.',
+    markers: [{x: jl.p50, label: 'p50'}, {x: jl.p95, label: 'p95'}]});
+  histogram($('c-llat'), ll.hist, {color: css('llm'), fmtX: (v) => (v / 1000).toFixed(1) + ' s', unit: '', empty: 'No LLM calls yet.',
+    markers: [{x: ll.p50, label: 'p50'}, {x: ll.p95, label: 'p95'}]});
+  line($('c-cost'), pf.cost_series, {color: css('llm'), fmt: usd, label: 'spent', empty: 'No LLM spend yet.', aria: 'Cumulative LLM cost'});
+  histogram($('c-prop'), m.behaviour.propensity, {color: css('fused'), fmtX: (v) => v.toFixed(2), empty: 'No sampled decisions yet.'});
+
+  // per-class selection frequency
+  const bq = m.by_question || {};
+  $('c-sel').innerHTML = Object.entries(bq).map(([q, s]) => {
+    const tot = Object.values(s.selection).reduce((a, b) => a + b, 0);
+    return `<div class="qtitle">${esc(q)}</div>` + hbars(Object.entries(s.selection).map(([c, n]) => (
+      {name: c, value: n, label: `${n} · ${pct(tot ? n / tot : null, 0)}`, tip: `${q} = ${c}: ${n} of ${tot}`})), Math.max(1, ...Object.values(s.selection)), css('accent'));
+  }).join('') || '<div class="empty">No selections yet.</div>';
+
+  // coupling
+  const cp = m.coupling;
+  $('c-coup').innerHTML = cp.pairs ? hbars([
+    {name: 'All pairs', value: cp.agreement, label: `${pct(cp.agreement, 0)} of ${cp.pairs}`, color: css('accent')},
+    {name: 'Shared noise', value: cp.agreement_shared, label: `${pct(cp.agreement_shared, 0)} of ${cp.pairs_shared}`, tip: help('coupling.agreement_shared').desc, color: css('fused')},
+    {name: 'Own noise', value: cp.agreement_independent, label: `${pct(cp.agreement_independent, 0)} of ${cp.pairs_independent}`, tip: help('coupling.agreement_independent').desc, color: css('jev')},
+  ].map((r) => ({...r, value: r.value || 0})), 1) + `<div class="qtitle">By question</div>` + hbars(Object.entries(cp.by_question).map(([q, v]) => (
+    {name: q, value: v.agreement || 0, label: `${pct(v.agreement, 0)} of ${v.pairs}`})), 1, css('accent'))
+    : '<div class="empty">Needs two or more agents in the same group deciding in the same epoch.</div>';
+
+  // per-question table
+  const cols = [['agreement', 'augmentation.agreement', pct], ['mean_abs_delta', 'augmentation.mean_abs_delta', fix],
+    ['argmax_flip_rate', 'augmentation.argmax_flip_rate', pct], ['first_option_rate', 'jev.first_option_rate', pct]];
+  const sw = m.behaviour.switch_rate_by_question || {};
+  $('c-qtab').innerHTML = `<div class="scroll-x"><table><thead><tr><th>Question</th><th class="n">n</th>
+    ${cols.map(([, k]) => `<th class="n" data-tip="${esc(help(k).desc)}">${esc(help(k).label)}</th>`).join('')}
+    <th class="n" data-tip="${esc(help('behaviour.switch_rate').desc)}">Switches / agent-min</th></tr></thead><tbody>
+    ${Object.entries(bq).map(([q, s]) => `<tr><td>${esc(q)}</td><td class="n">${s.n}</td>${cols.map(([f, , fm]) => `<td class="n">${fm(s[f])}</td>`).join('')}<td class="n">${fix(sw[q])}</td></tr>`).join('')}
+    </tbody></table></div>
+    ${Object.keys(m.behaviour.flags || {}).length ? `<div class="qtitle">LLM flags</div><div class="qmeta">${Object.entries(m.behaviour.flags).map(([k, v]) => `<span class="badge">⚑ ${esc(k)} · ${v}</span>`).join('')}</div>` : ''}`;
+
+  // calibration
+  const ce = $('c-cal');
+  if (!cal || !Object.keys(cal).length) {
+    ce.innerHTML = `<div class="empty">No labels yet. Publish jev_ai_msgs/Label on <span class="mono">labels</span> (or pass <span class="mono">--labels labels.jsonl</span> to the report) to see how well Jev, the LLM and the fused result are calibrated.</div>`;
+  } else {
+    const qn = Object.keys(cal);
+    ce.innerHTML = `<p class="sub">Each dot is a bin of decisions; on the grey diagonal a model is perfectly calibrated, above it under-confident, below it over-confident.</p><div class="grid qgrid">${qn.map((q, i) => `<div><h3>${esc(q)}</h3>
+      ${legend(SOURCES.filter(([k]) => cal[q][k] && cal[q][k].n).map(([k, n, c]) => [css(c), `${n}: ECE ${fix(cal[q][k].ece, 3)} · NLL ${fix(cal[q][k].nll)} · n ${cal[q][k].n}`]))}
+      <div id="rel-${i}" style="margin-top:6px"></div></div>`).join('')}</div>`;
+    qn.forEach((q, i) => { const el = $('rel-' + i); el.innerHTML = reliability(el, cal[q]); });
+  }
+  S.metricsStamp = S.data.metrics.generated_at;
+}
+
+// ======================================================================= shell: tabs, filter, data
+function renderStatus() {
+  const D = S.data;
+  if (S.live) {
+    const age = (Date.now() - S.lastOk) / 1000, ok = S.lastOk && age < 5;
+    $('status').innerHTML = `<i class="dot" style="background:var(--${ok ? 'good' : 'critical'})"></i>${ok ? 'Live' : 'Disconnected'}${S.lastOk ? ` · updated ${ago(age)} ago` : ''}${S.error && !ok ? ' · ' + esc(S.error) : ''}`;
+  } else if (D) {
+    $('status').innerHTML = `<i class="dot" style="background:var(--muted)"></i>Static report · generated ${esc(new Date((D.generated_at || 0) * 1000).toLocaleString())} · ${esc((D.metrics && D.metrics.overall.volume.records) || 0)} records · ages are relative to the last record`;
+  }
+}
+function renderFilter() {
+  const sets = (S.data && S.data.metrics && S.data.metrics.question_sets) || [];
+  const html = `<option value="">All</option>` + sets.map((s) => `<option value="${esc(s)}" ${s === S.qs ? 'selected' : ''}>${esc(s)}</option>`).join('');
+  if ($('qs-filter').innerHTML !== html) $('qs-filter').innerHTML = html;
+}
+function render(force) {
+  renderStatus(); renderFilter();
+  if (S.tab === 'live') renderLive();
+  else if (force || !S.data || S.metricsStamp !== (S.data.metrics && S.data.metrics.generated_at)) renderMetrics();
+}
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
+  S.tab = b.dataset.tab;
+  document.querySelectorAll('nav button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+  $('view-live').classList.toggle('hidden', S.tab !== 'live');
+  $('view-metrics').classList.toggle('hidden', S.tab !== 'metrics');
+  try { localStorage.setItem('jev-tab', S.tab); } catch (e) { /* storage blocked */ }
+  render(true);
+}));
+$('qs-filter').addEventListener('change', (e) => { S.qs = e.target.value; S.pinned = null; S.sel = null; render(true); });
+$('strip').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-key]');
+  if (b) { S.pinned = b.dataset.key; renderLive(); $('detail-wrap').scrollIntoView({behavior: 'smooth', block: 'nearest'}); }
+});
+$('cards').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-card]');
+  if (b) { S.sel = b.dataset.card; S.pinned = null; renderLive(); $('detail-wrap').scrollIntoView({behavior: 'smooth', block: 'nearest'}); }
+});
+let resizeTimer;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => S.tab === 'metrics' && renderMetrics(), 150); });
+
+async function poll() {
+  try {
+    const r = await fetch('api/state', {cache: 'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    S.data = await r.json(); S.lastOk = Date.now(); S.error = '';
+    render(false);
+  } catch (e) { S.error = e.message; renderStatus(); }
+  setTimeout(poll, 1000);
+}
+
+(function start() {
+  try { const t0 = localStorage.getItem('jev-tab'); if (t0 === 'metrics') $('tab-metrics').click(); } catch (e) { /* storage blocked */ }
+  const embedded = JSON.parse($('jev-data').textContent);
+  if (embedded) { S.data = embedded; render(true); }
+  else { S.live = true; renderStatus(); poll(); setInterval(renderStatus, 1000); }
+})();
+</script>
+</body>
+</html>

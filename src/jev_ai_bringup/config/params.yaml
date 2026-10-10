@@ -1,0 +1,61 @@
+# jev_ai server defaults (§8, §9, §14). Keys never go here: TYPESAFE_API_KEY / ANTHROPIC_API_KEY
+# env vars, or api_key_file (e.g. a mounted k8s Secret).
+jev_server:
+  ros__parameters:
+    model: ''                      # '' = backend default; pin e.g. jev-1.13.0 when tuning
+    timeout_s: 1.0
+    max_retries: 1
+    max_rps: 50.0
+    max_tokens_per_min: 200000.0
+    max_usd_per_hour: 5.0
+    breaker_errors: 5
+    breaker_cooldown_s: 30.0
+    record_path: ''                # set to record a cassette for the replay backend
+    usd_per_mtok_input: 0.042      # Jev input price (output is free), for the budget
+    typesafe:
+      model: ''                    # '' = jev-latest
+      base_url: ''                 # '' = api.typesafe.ai; OpenRouter: https://openrouter.ai/api
+    llama_ros:
+      service: llama/evaluate_decisions
+    mock:                          # keyless, deterministic (backend:=mock)
+      seed: 0
+      alpha: 1.0                   # Dirichlet concentration
+      first_bias: 0.0              # extra weight on class 0 (Jev's first-option bias)
+      latency_s: 0.02
+      fail_rate: 0.0
+      rules: ''                    # optional "module:function" making answers state-aware
+    replay:
+      path: ''
+
+llm_server:
+  ros__parameters:
+    model: claude-haiku-5-5
+    effort: low
+    max_tokens: 1024
+    timeout_s: 6.0                 # = llm_timeout (§14); engines wait T_wait = llm_timeout + 0.5
+    max_retries: 1
+    max_rps: 10.0
+    max_tokens_per_min: 200000.0
+    max_usd_per_hour: 5.0
+    breaker_errors: 5
+    breaker_cooldown_s: 30.0
+    record_path: ''
+    openai_compat:
+      base_url: https://api.openai.com/v1
+      api_key_env: OPENAI_API_KEY
+    mock:                          # keyless (backend:=mock): echoes Jev with seeded disagreement
+      seed: 0
+      disagreement: 0.3
+      latency_s: 0.3
+      fail_rate: 0.0
+    replay:
+      path: ''
+
+decision_logger:
+  ros__parameters:
+    path: ''                       # '' = ~/.ros/jev_ai/decisions-<time>.jsonl
+
+dashboard:
+  ros__parameters:
+    host: 0.0.0.0
+    max_records: 5000

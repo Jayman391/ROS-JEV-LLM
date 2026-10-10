@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>jev_ai_servers</name>
+  <version>0.1.0</version>
+  <description>jev_ai servers: lifecycle jev_server (JevDecide) and llm_server (Reason) with pluggable backends, budgets, circuit breaker and diagnostics.</description>
+  <maintainer email="jasonlobell123@gmail.com">Jason Lobell</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>jev_ai</exec_depend>
+  <exec_depend>jev_ai_msgs</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

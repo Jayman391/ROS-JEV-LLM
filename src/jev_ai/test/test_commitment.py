@@ -137,6 +137,23 @@ def test_dwell_blocks_voluntary_switch_not_mask_forced(qset):
     assert s.selected['next_action'] == 'continue'                       # dwell elapsed
 
 
+def test_committed_class_is_kept_until_completed(qset):
+    """A5 decision: an until_commit class past commit_point() is held, not aborted."""
+    m = machine(qset)
+    m.on_event(0.0, state=STATE, p_jev=P(FAR), required={'next_action': 'inspect'})
+    m.commit_point('next_action')
+    strong_continue = P([0.98, 0.01, 0.01])
+    s = m.on_event(60.0, state=STATE, p_jev=strong_continue)
+    t = s.traces['next_action']
+    assert (t.selected, t.path) == ('inspect', 'committed')
+    s = m.on_event(61.0, state=STATE, p_jev=strong_continue, masked={'next_action': {'inspect'}})
+    assert s.selected['next_action'] == 'continue'                       # masks still win
+    m.on_event(62.0, state=STATE, p_jev=P(FAR), required={'next_action': 'inspect'})
+    m.completed('next_action')
+    s = m.on_event(120.0, state=STATE, p_jev=strong_continue)
+    assert s.selected['next_action'] == 'continue'                       # released
+
+
 def test_jev_failures_keep_current_then_degrade(qset):
     m = machine(qset)
     m.on_event(0.0, state=STATE, p_jev=P(FAR), required={'next_action': 'inspect'})

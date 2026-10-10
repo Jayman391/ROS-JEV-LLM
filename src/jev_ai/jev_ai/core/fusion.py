@@ -145,7 +145,7 @@ class Trace:
     # engine-side
     fused: list[float] = field(default_factory=list)   # softmax(z): Decision.fused
     values: dict = field(default_factory=dict)          # Decision.values
-    path: str = ''   # forced|jev_error|irreversible|irreversible_pending|dwell|sample|argmax|
+    path: str = ''   # forced|jev_error|irreversible|irreversible_pending|committed|dwell|sample|argmax|
     #                  expectation|threshold|none   (degraded is set by Commitment)
     flags: list[str] = field(default_factory=list)
 
@@ -154,12 +154,16 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
                     q_llm: list[float] | None = None, llm_age_s: float = 0.0,
                     masked=(), required: str = '', current: str = '',
                     irreversible: set[str] | None = None, augmented: bool = False,
-                    may_switch: bool = True, bias: list[float] | None = None) -> Trace:
+                    may_switch: bool = True, bias: list[float] | None = None,
+                    committed: bool = False) -> Trace:
     """Fuse, then select per the question's act (§6.2-§6.4).
 
     p_jev None = Jev failed for this question: keep the current class (§11).
     augmented = augmentation for *this* decision has arrived (irreversible rule).
     may_switch = False inside T_dwell: keep the current class unless it became masked.
+    committed = the current class passed its commit point (``until_commit``): keep it until
+    ``completed()``, unless it is masked, another class is required, or a *different*
+    irreversible class wins the §6.4 rule (A5 decision).
     """
     pol = q.policy
     names = q.class_names
@@ -209,7 +213,7 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
         t.values = {f'{q.name}.p_true': p_true}
         t.path = 'threshold'
     else:
-        _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch)
+        _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch, committed)
     return t
 
 
@@ -218,16 +222,17 @@ def _wins_by(z: list[float], a: int, margin: float) -> bool:
     return all(z[a] - v >= margin for i, v in enumerate(z) if i != a)
 
 
-def _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch):
+def _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch, committed=False):
     pol, names = q.policy, q.class_names
     ci = names.index(current) if current in names else None
-    cur_ok = ci is not None and not mvec[ci] and not ivec[ci]   # current is still selectable
+    held = committed and ci is not None and not mvec[ci]       # past its commit point: keep it
+    cur_ok = ci is not None and not mvec[ci] and (not ivec[ci] or held)   # still selectable
 
     # §6.4 irreversible rule: argmax with margin m_irrev, plus augmentation; never sampled.
     # The rule must hold on Jev alone AND after fusion: the LLM can veto an irreversible class
     # but cannot create one (e.g. by pushing every reversible class down).
     a = max(range(len(z)), key=lambda i: z[i])
-    if ivec[a]:
+    if ivec[a] and not (held and a == ci):
         if _wins_by(z, a, pol.m_irrev) and _wins_by(z_jev, a, pol.m_irrev):
             if augmented:
                 t.selected, t.path, t.irreversible_path = names[a], 'irreversible', True
@@ -235,6 +240,10 @@ def _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch):
                 t.selected = current if cur_ok else q.fallback
                 t.path = 'irreversible_pending'
             return
+
+    if held:
+        t.selected, t.path = current, 'committed'
+        return
 
     if not may_switch and cur_ok:
         t.selected, t.path = current, 'dwell'

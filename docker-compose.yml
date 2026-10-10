@@ -11,6 +11,7 @@ services:
     # viewed in a browser at http://localhost:6080/vnc.html
     ports:
       - "127.0.0.1:6080:6080"
+      - "127.0.0.1:8080:8080"      # jev_ai dashboard (ros2 launch jev_ai_examples toy_patrol.launch.py)
     environment:
       # Gazebo GUI in a VM has no GPU; software rendering avoids GL failures
       - LIBGL_ALWAYS_SOFTWARE=1

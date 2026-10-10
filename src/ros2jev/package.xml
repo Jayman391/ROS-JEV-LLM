@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2jev</name>
+  <version>0.1.0</version>
+  <description>ros2cli extension for jev_ai: ros2 jev status | ask | report.</description>
+  <maintainer email="jasonlobell123@gmail.com">Jason Lobell</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>ros2cli</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>jev_ai</exec_depend>
+  <exec_depend>jev_ai_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
