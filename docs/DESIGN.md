@@ -1,134 +1,96 @@
-# Design: LLM + Jev drone swarm POC (search & rescue)
+# ROS-JEV: design and roadmap
+
+## Goal
+
+The goal is **a core Jev + LLM decision framework for ROS 2 (`rosjev`)**, with a drone swarm as its reference example.
+- **System 1:** TypeSafe Jev, as ROS services, gives calibrated typed decisions.
+- **System 2:** Claude LLMs, as ROS actions, augment those decisions.
+- **The framework** handles fusion, safety masking, sampling, commitment, hierarchy, logging and offline optimisation.
+
+The framework is built first, through that lens, and verified on its own. The drone swarm is built **at the very end**, purely as an application of it.
 
 | Doc | Contents |
 |---|---|
-| [RESEARCH.md](RESEARCH.md) | prior art, APIs, simulation and k8s findings |
-| [SYSTEM_MODEL.md](SYSTEM_MODEL.md) | mission, environment, vehicle, sensors, action spaces, objectives, constraints, parameters |
-| [DECISION_MODEL.md](DECISION_MODEL.md) | feature space, Jev question classes, output mapping, Jev+LLM fusion, optimization |
-| this file | ROS graph, interfaces, containers, k8s, phased plan |
+| [RESEARCH.md](RESEARCH.md) | prior art, Jev and Anthropic APIs, Gazebo and k8s findings |
+| [FRAMEWORK.md](FRAMEWORK.md) | **the core spec:** concepts, interfaces, catalog, runtime, fusion, LLM contract, hierarchy, safety, optimisation toolkit, deployment |
+| [examples/drone_swarm/SYSTEM_MODEL.md](examples/drone_swarm/SYSTEM_MODEL.md) | example world: mission, environment, vehicle, sensors, action spaces, objectives, constraints, ROS graph |
+| [examples/drone_swarm/DECISION_MODEL.md](examples/drone_swarm/DECISION_MODEL.md) | the example's rosjev configuration: encoders, question catalog, masks, triggers, allocator |
 
 ## Principles
 
-1. **System 1 decides, System 2 augments.**
-   - Jev (a **service**) gives a calibrated baseline for every decision.
-   - The LLM (an **action**) always contributes a preference that is pooled into Jev's distribution. Its weight grows as Jev's confidence falls.
-   - Sampling at temperature τ keeps some nondeterminism even when Jev is confident.
-   - Decisions act on Jev immediately and are revised when the LLM answers ("act-then-revise").
-   - See [DECISION_MODEL §5](DECISION_MODEL.md#5-fusion-jev-baseline--llm-augmentation).
-2. **LLM proposes, controller disposes.**
-   - Models choose from a fixed action vocabulary.
-   - Deterministic C++ executes the choice, and enforces the hard constraints as reflexes *and* as action masks.
-3. **Numbers live in code; meaning lives in the models.** Features are bucketed, interpreted strings, because Jev is weak at arithmetic.
-4. **One ROS node = one container = one service.** One image, many commands. Discovery goes through the Fast DDS Discovery Server.
+1. **The framework knows nothing about drones.**
+   - Every domain concept enters through the catalog (YAML) or the three agent hooks: `encode_state`, `mask`, `on_decision`.
+   - Anything the drone example needs that is generic gets added to the framework first.
+2. **System 1 decides, System 2 always augments.** Confidence-weighted log-linear pooling, masks, shared-seed temperature sampling, act-then-revise (FRAMEWORK §5–6).
+3. **Deterministic code owns numbers and safety.** Models choose among declared classes; masks are absolute.
+4. **One ROS node = one container = one service.** One image; Fast DDS Discovery Server; both compose and k8s, from the first runnable phase onward.
 5. **Each phase is standalone and verifiable.**
-   - Each phase adds its services to both compose and k8s.
-   - The model nodes have mock backends, so everything runs without API keys.
-6. **Everything is logged for offline optimisation.** Every decision emits a `DecisionRecord`, and every episode emits a score J.
-
-## ROS graph
-
-```
-                     ┌──────────────────────── /coordinator ─────────────────────────┐
- user ─Mission.action─▶ mission_coordinator (py) ── FSM, track registry               │
-                     │    ├─ JevDecide.srv ──▶ jev (py)      C1–C7                     │
-                     │    ├─ Reason.action ──▶ llm (py)      Sonnet 5.5: plan/augment  │
-                     │    └─ Formation.action / Allocate.srv ─▶ formation_planner (C++) │
-                     └───────▲ /swarm/reports (via comms_sim) ─── orders ▼ ───────────┘
-                             │                                         │
-                     ┌───────┴────────────── /uavK (×N) ───────────────▼─────────────┐
-                     │ drone_agent (py) ── features → Jev W1–W7 → fuse(LLM) → act     │
-                     │    ├─ JevDecide.srv ──▶ jev (py)                                │
-                     │    ├─ Reason.action ──▶ llm (py)      Haiku 5.5, effort low    │
-                     │    └─ Task.action ────▶ flight_controller (C++) primitives +    │
-                     │                           safety layer H1–H8, publishes status  │
-                     │ sensor_sim (C++) ── battery, proximity, detections, link        │
-                     └──────▲ odom/imu/altimeter/gps ───── cmd_vel ▼───────────────────┘
-                     ┌──────┴────────────────────────────────────────────────────────┐
-                     │ sim pod: Gazebo Fortress (noVNC :6080) + ros_gz_bridge         │
-                     │ environment (py): scenario seed → targets, wind, faults, truth │
-                     │ comms_sim (C++)   mission_scorer (py)   decision_logger (py)    │
-                     └───────────── discovery (Fast DDS Discovery Server :11811) ────┘
-```
-
-**Ground-truth isolation:** only `environment`, `sensor_sim` and `mission_scorer` subscribe to `/env/ground_truth`. Agents see the world only through sensors.
-
-## Interfaces (`swarm_interfaces`)
-
-| Kind | Name | Purpose |
-|---|---|---|
-| msg | `JevQuestion`, `JevAnswer` | typed Jev question and answer (choice / score / noul) |
-| msg | `Detection`, `DetectionArray` | detector output: track id, position estimate, class scores, altitude, sightings |
-| msg | `LinkStatus` | link quality, latency, loss |
-| msg | `DroneStatus` | mode, pose, velocity, energy margin, current task |
-| msg | `DroneReport` | situation (W7), class probabilities (W2), recommendation, escalation, rationale |
-| msg | `DroneOrder` | coordinator → drone: assignment / inspection / recall / formation slot |
-| msg | `Track`, `TrackArray` | the coordinator's fused track registry |
-| msg | `DecisionRecord` | full decision trace for offline optimisation |
-| srv | `JevDecide` | state + questions → answers (all Jev nodes) |
-| srv | `Allocate` | cost inputs → Hungarian assignment |
-| action | `Reason` | task + context + JSON schema → streamed text → structured result (all LLM nodes) |
-| action | `Task` | flight primitive (TAKEOFF, GOTO, HOLD, SURVEY, ORBIT, FORMATION_SLOT, RTB, LAND) |
-| action | `Formation` | shape, spacing, centre, heading → all drones in their slots |
-| action | `Mission` | natural-language objective → plan → executed mission summary |
-
-## Containers (N = 4 → 30 services, one image `ros-jev:swarm`)
-
-| Service | Lang | Count | Notes |
-|---|---|---|---|
-| discovery | — | 1 | `fastdds discovery -i 0 -p 11811` |
-| sim (+ bridge) | — | 1 | Gazebo server + GUI on Xvfb/noVNC; in k8s, Gazebo and the bridge are two containers in one pod |
-| environment | Python | 1 | scenario generator (seed), ground truth, moving animals, wind, faults |
-| comms_sim | C++ | 1 | relays reports and orders with distance-based loss |
-| mission_scorer | Python | 1 | computes J |
-| decision_logger | Python | 1 | JSONL on a volume |
-| flight_controller | C++ | N | |
-| sensor_sim | C++ | N | |
-| jev (drone) | Python | N | |
-| llm (drone) | Python | N | |
-| drone_agent | Python | N | |
-| formation_planner | C++ | 1 | coordinator |
-| jev (coordinator) | Python | 1 | coordinator |
-| llm (coordinator) | Python | 1 | coordinator |
-| mission_coordinator | Python | 1 | coordinator |
-
-**Disk:** the host has about 16 GiB free, so one shared image and a slim runtime stage are mandatory.
-
-**Kubernetes mapping:**
-- Each per-drone node type is a **StatefulSet** with `replicas: N`. Pod ordinal `k` maps to namespace `uav{k+1}`, so `kubectl scale` resizes the swarm. The world generator reads the same N.
-- Per-drone services become **headless** Services.
-- API keys are a Secret.
-- All manifests are kustomize (`kubectl apply -k k8s/`), on Docker Desktop's cluster with `imagePullPolicy: Never`.
+   - Each phase has its own verification command.
+   - Mock backends mean nothing needs API keys until a phase explicitly verifies live inference.
+6. **Python and C++ are equal citizens.**
+   - The core logic is mirrored in both languages and pinned by shared golden vectors.
+   - The SDK clients live in Python nodes, which C++ reaches over ROS interfaces.
 
 ## Repo layout
 
 ```
-Dockerfile                  stages: base (ROS + Gazebo + noVNC), swarm (built workspace)
-docker-compose.yml          ros2 dev shell + profile "swarm" (one service per node)
-config/scenario.yaml        parameter registry defaults (SYSTEM_MODEL §8, DECISION_MODEL §8)
-src/swarm_interfaces/       msgs, srvs, actions
-src/swarm_sim/              world generator, bridge config, environment, scorer (py)
-src/swarm_control/          flight_controller, sensor_sim, comms_sim, formation_planner (C++)
-src/swarm_ai/               jev, llm, decision core, drone_agent, mission_coordinator, logger (py)
-k8s/                        kustomize base + per-phase components
-eval/                       episode runner, ablations, calibration notebooks
+Dockerfile                    stages: base (ROS + Gazebo + noVNC) · rosjev (built workspace)
+docker-compose.yml            dev shell (ros2) + profiles per phase
+deploy/compose/rosjev.yml     framework base (x-rosjev-node, discovery, decision_logger)
+k8s/base, k8s/components/     kustomize: discovery, logger, secrets · jev, llm, agent templates
+src/rosjev_interfaces/        Question, Distribution, JevDecide, Reason, Report, Directive, DecisionRecord, Label
+src/rosjev_core/              pure-Python decision engine + golden vectors
+src/rosjev_cpp/               C++ engine (parity) + clients + rosjev::Agent
+src/rosjev_jev/               Jev service node + backends
+src/rosjev_llm/               LLM action node + backends
+src/rosjev_agent/             Python Agent runtime
+src/rosjev_tools/             decision_logger, rosjev-calibrate, rosjev-replay, rosjev-search
+src/rosjev_examples/          toy_patrol (Python + C++ agents, supervisor), no Gazebo
+examples/drone_swarm/         ← Part B only: swarm_interfaces, swarm_sim, swarm_control, swarm_ai, k8s overlay
 docs/
 ```
 
-## Phases
+## Roadmap
 
-Each phase ships its own code, its compose and k8s entries, and one verification command, and it works without the later phases.
+### Part A: the rosjev framework
+
+| # | Feature | Verify | Pairing point |
+|---|---|---|---|
+| A1 | `rosjev_interfaces` + workspace + `rosjev` image stage | `ros2 interface show rosjev_interfaces/srv/JevDecide` in the built image | review the message fields |
+| A2 | **`rosjev_core`**: catalog loader and validator, fusion, shared-seed inverse-CDF sampler, masks, triggers, token bucket, commitment machine, prompt/schema builder, parameter clamping. Golden vectors | `pytest src/rosjev_core` (includes `fusion_01` = FRAMEWORK §6.2) | **you write the β(c) schedule and the keep/revise rule** |
+| A3 | **`rosjev_jev`** node: backends `mock`, `typesafe`, `openrouter`, `replay` + compose service + k8s component | `ros2 service call /jev/decide …` (mock); the same call live with `TYPESAFE_API_KEY` | the mock backend's realism |
+| A4 | **`rosjev_llm`** node: backends `mock`, `anthropic` (streaming, json_schema, effort, prompt caching), `replay` + compose + k8s | `ros2 action send_goal --feedback /llm/reason …` (mock); live with `ANTHROPIC_API_KEY` | augmentation system-prompt template |
+| A5 | **`rosjev_agent`** Python runtime + `decision_logger` + `toy_patrol` single Python agent | `docker compose --profile toy up`: records stream to JSONL; stop the llm container → records show β = 0 fallback; restart → augmentation resumes | toy catalog design |
+| A6 | **`rosjev_cpp`**: C++ engine (golden-vector parity), Jev/LLM clients, `rosjev::Agent`; C++ toy agent | `colcon test --packages-select rosjev_cpp` (gtest parity); the C++ agent runs in the toy profile | C++ API ergonomics |
+| A7 | **Hierarchy**: Report/Directive, supervisor agents, per-item sets, batched augmentation, directive-epoch shared seeds; toy supervisor + 3 workers | the supervisor issues a directive; the workers' records share `u`; per-item requests are visible in the logs | supervisor question design |
+| A8 | **Optimisation toolkit**: `rosjev-calibrate`, `rosjev-replay`, `rosjev-search` + toy `EpisodeRunner` + toy `Label`s | calibrate on toy runs → a policy patch; replay with a permuted class order → a bias report; search over 2 configs × 3 seeds → a J table | which metrics to report |
+| A9 | **k8s deployment kit**: kustomize base + components; toy app on Docker Desktop k8s; scale workers | `kubectl apply -k k8s/overlays/toy`; `kubectl scale statefulset toy-worker --replicas 5` → 5 agents in the records | resource limits |
+
+### Part B: drone swarm reference example (very end)
 
 | # | Feature | Verify |
 |---|---|---|
-| 1 | `swarm_interfaces` + `swarm` image stage + `config/scenario.yaml` | `ros2 interface show swarm_interfaces/srv/JevDecide` |
-| 2 | **Sim core:** discovery, world generator (AO, base, obstacles, NFZ visuals, N X3 drones with IMU/altimeter/GPS), bridge | from a separate container: `ros2 topic echo /uav1/odom`; publish `/uav1/cmd_vel` → the drone climbs in noVNC |
-| 3 | **Environment + sensors:** `environment` (seeded targets visible in Gazebo, wind, faults), `sensor_sim` (battery, proximity, detector, link), `comms_sim` | fly uav1 over a target with `cmd_vel` → `/uav1/detections` shows its class scores; the battery drains |
-| 4 | **`flight_controller`:** Task primitives + safety layer H1–H8 | `ros2 action send_goal /uav1/task "{type: SURVEY …}"` → lawnmower pattern; a GOTO into an NFZ is deflected |
-| 5 | **`formation_planner` + allocator:** Hungarian, the 5 formations | unit test, then `ros2 action send_goal /coordinator/formation "{shape: v}"` |
-| 6 | **`jev` service:** TypeSafe SDK + mock backend | `ros2 service call /uav1/jev/decide …` returns distributions |
-| 7 | **`llm` action:** Anthropic streaming + JSON-schema output + mock backend | `ros2 action send_goal --feedback /uav1/llm/reason …` |
-| 8 | **Decision core** (pure Python, no ROS): feature buckets, question catalog, fusion, masks, triggers, rate limiter, act-then-revise | `pytest src/swarm_ai/test` (includes the DECISION_MODEL §5.2 worked example) |
-| 9 | **`drone_agent`:** one drone autonomously surveys and inspects | uav1 alone finds and inspects a target; its `DecisionRecord`s show fusion |
-| 10 | **`mission_coordinator`:** Sonnet plan, FSM, track registry, C1–C7 | `ros2 action send_goal /coordinator/mission "{objective: …}"` runs end to end |
-| 11 | **Scoring + evaluation:** `mission_scorer`, `decision_logger`, episode runner, P0–P4 ablations | `eval/run.py --seeds 2 --policies P1,P4` prints a J table |
-| 12 | **k8s scale & hardening:** resource limits, scale test | `kubectl scale statefulset … --replicas 6` → 6 drones fly |
+| B1 | Sim core: world generator (AO, base, obstacles, NFZ, N X3 drones with IMU/altimeter/GPS), bridge, sim pod | `ros2 topic echo /uav1/odom` from another container; `cmd_vel` → climb in noVNC |
+| B2 | `environment`, `sensor_sim`, `comms_sim` (C++/Py): seeded targets, battery, proximity, detector, link | fly over a target → `/uav1/detections` shows its class scores |
+| B3 | `flight_controller` (C++): Task primitives + safety H1–H8 | SURVEY goal → lawnmower pattern; GOTO into an NFZ → deflected |
+| B4 | `formation_planner` + allocator (C++): Hungarian, 5 formations, relay point | gtest; `Formation` goal → V formation in Gazebo |
+| B5 | `drone_agent` on rosjev: encoders, catalog W1–W7, masks | uav1 alone finds and inspects a target; its records show fusion |
+| B6 | `mission_coordinator` on rosjev: Sonnet plan, FSM, C1–C8, track registry | `Mission` goal runs end to end with 4 drones |
+| B7 | `mission_scorer` + `EpisodeRunner`; P0–P4 ablations via `rosjev-search` | J table over seeds |
+| B8 | k8s overlay + scale | `kubectl scale … --replicas 6` → 6 drones fly |
+
+## Decisions log
+
+| Date | Decision |
+|---|---|
+| 2026-10-10 | Mission scenario: search and rescue (example) |
+| 2026-10-10 | Augmentation timing: act-then-revise |
+| 2026-10-10 | Fusion: log-linear pool + temperature |
+| 2026-10-10 | LLM cadence: event-triggered + rate cap |
+| 2026-10-10 | Coordinator Sonnet effort: `medium` for both augmentation and planning; drone Haiku stays `low` |
+| 2026-10-10 | Class order: status quo first |
+| 2026-10-10 | LLM may propose bounded parameters (`llm_params`, clamped) |
+| 2026-10-10 | Sampling: one shared seed per group (inverse-CDF on a common u) |
+| 2026-10-10 | Relay placement: included in v1 (example) |
+| 2026-10-10 | LLM cost weight in J: 10 points per $ (example) |
+| 2026-10-10 | **Project goal: framework first; the drone swarm is the final example** |

@@ -1,11 +1,12 @@
-# System model: sensor–robot–environment
+# Drone swarm example: system model (sensor–robot–environment)
 
-This is the physical and mission model the swarm operates in. Every number here is a **parameter**: section 8 collects them, with defaults and ranges.
+This is the physical and mission model for the **reference application** of the rosjev framework. Every number here is a **parameter**: section 8 collects them, with defaults and ranges.
 
-- [DECISION_MODEL.md](DECISION_MODEL.md) covers how decisions are made inside this model.
-- [DESIGN.md](DESIGN.md) covers how it maps to ROS nodes and containers.
+- [DECISION_MODEL.md](DECISION_MODEL.md) is the swarm's rosjev catalog, encoders and masks.
+- [FRAMEWORK.md](../../FRAMEWORK.md) is the framework itself.
+- [DESIGN.md](../../DESIGN.md) is the roadmap. This example is built last.
 
-Status: **draft for review**. Items marked ⚑ are open decisions; items marked VERIFY must be checked in the named phase.
+Status: **draft for review**. Items marked VERIFY must be checked in the named phase.
 
 ---
 
@@ -65,7 +66,7 @@ SEARCH and CONFIRM can overlap: a drone that finishes its sector early can be se
 | animal | 1–2 | moves slowly (0.3 m/s random walk) |
 | *spurious* | — | not a physical object; the detector's false positives (§4.6) |
 
-**Episode randomisation** (for evaluation, [DECISION_MODEL §7](DECISION_MODEL.md#7-optimization-scheme)). An episode seed sets:
+**Episode randomisation** (for evaluation, [FRAMEWORK §12](../../FRAMEWORK.md#12-observability-and-optimisation-toolkit-rosjev_tools)). An episode seed sets:
 - target positions and the class mix
 - wind (W ∈ [0, 8] m/s, any direction)
 - visibility
@@ -175,7 +176,7 @@ Primitives are preemptible: a new goal cancels the current one. Exceptions are `
 | `request_support` | keep the task and ask the coordinator for help (a second inspector, or a sector handoff) | (no motion change) + priority report | yes | a request is already pending for less than 20 s |
 | `land_now` | emergency landing in place | LAND | **no** | not in critical failure (§5.4); over an obstacle |
 
-`inspect` and `land_now` are **irreversible-class** decisions. Under act-then-revise they wait for the LLM's augmentation (up to T_wait) before they commit; see [DECISION_MODEL §5](DECISION_MODEL.md#5-fusion-jev-baseline--llm-augmentation).
+`inspect` and `land_now` are **irreversible-class** decisions. Under act-then-revise they wait for the LLM's augmentation (up to T_wait) before they commit; see [FRAMEWORK §5.3](../../FRAMEWORK.md#53-commitment-act-then-revise).
 
 The parameters of a chosen action (which detection, orbit radius, inspection altitude) are computed deterministically. The LLM may *propose* parameter adjustments within bounds (inspection altitude 8–15 m, orbit radius 4–10 m, laps 1–2), and the controller clamps them.
 
@@ -185,12 +186,10 @@ The parameters of a chosen action (which detection, orbit radius, inspection alt
 |---|---|---|
 | **Phase transition** (each cycle) | `stay`, `advance`, `recover_all`, `abort` | state-machine transition; triggers the phase's swarm behaviour |
 | **Transit formation** (on entering TRANSIT/RECOVER) | `column`, `line`, `v`, `diamond`, `circle` | Formation action; Hungarian slot assignment |
-| **Sector allocation** (on entering SEARCH and after a drone is lost) | assignment matrix | Hungarian on cost C(d, s) ([DECISION_MODEL §7.2](DECISION_MODEL.md#72-online-combinatorial-coordinator-allocation)) |
+| **Sector allocation** (on entering SEARCH and after a drone is lost) | assignment matrix | Hungarian on cost C(d, s) ([DECISION_MODEL §7](DECISION_MODEL.md#7-domain-optimization-coordinator-allocator-c)) |
 | **Track verdict** (per fused detection track) | `confirm_survivor`, `confirm_non_survivor`, `request_inspection`, `dismiss`, `await_data` | updates the track registry; `request_inspection` → dispatch the cheapest feasible drone |
 | **Report response** (per incoming worker report) | `acknowledge`, `dispatch_support`, `reassign_sector`, `recall_drone`, `replan` | an order to the drone(s); `replan` → a Sonnet mission replan |
-| **Relay placement** ⚑ | `none`, or `relay(drone, point)` | GOTO + HOLD at the midpoint between base and the far sector |
-
-⚑ Relay placement adds a sixth decision type and the comms-relay physics. Keep it for v1, or defer it until the link model proves to be a binding constraint?
+| **Relay placement** (C8, in v1) | `none`, or `relay(drone, point)` | GOTO + HOLD on the base→sector line, where both hops have q ≥ 0.7 |
 
 ## 6. Objectives
 
@@ -209,7 +208,7 @@ J = 100 · ( w_R·Recall_surv + w_P·Precision_conf + w_C·Coverage
 | Coverage | covered AO cells ÷ total cells | w_C = 0.20 |
 | Time | t_done = time all drones are landed (T_max if not) | w_T = 0.10 |
 | Energy | total energy used | w_E = 0.10 |
-| LLM cost | $ spent on the Anthropic + TypeSafe APIs | w_$ = 10 points per $ ⚑ |
+| LLM cost | $ spent on the Anthropic + TypeSafe APIs | w_$ = 10 points per $ |
 
 **Penalties** (counted, but the safety layer should keep them near zero):
 
@@ -282,5 +281,42 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
 | comms | `R_c`, `link_slope`, `latency_ms` | 250 m, 20 m, 50 + U(0, 200) | |
 | safety | `d_sep`, `obstacle_clear`, `nfz_buffer`, `lost_link_hold_s`, `lost_link_rtb_s` | 4, 3, 5 m, 10, 30 s | |
 | control | `controller_hz`, `agent_hz`, `coordinator_hz` | 50, 1, 0.5 | |
-| decision | see [DECISION_MODEL §8](DECISION_MODEL.md#8-decision-parameters) | | |
+| decision | see [DECISION_MODEL §8](DECISION_MODEL.md#8-example-parameters-overrides-of-framework-14) and [FRAMEWORK §14](../../FRAMEWORK.md) | | |
 | scoring | `w_R`, `w_P`, `w_C`, `w_T`, `w_E`, `w_$` | 0.4, 0.2, 0.2, 0.1, 0.1, 10/$ | |
+
+## 9. ROS graph and containers (built on rosjev)
+
+```
+                     ┌──────────────────────── /coordinator ─────────────────────────┐
+ user ─Mission.action─▶ mission_coordinator (rosjev Agent, supervisor) ── FSM, tracks │
+                     │    ├─ JevDecide.srv ──▶ jev (rosjev_jev)                      │
+                     │    ├─ Reason.action ──▶ llm (rosjev_llm, Sonnet 5.5 medium)   │
+                     │    └─ Formation.action / Allocate.srv ─▶ formation_planner (C++)
+                     └───────▲ rosjev Reports (via comms_sim) ── Directives ▼ ────────┘
+                     ┌───────┴────────────── /uavK (×N) ───────────────▼─────────────┐
+                     │ drone_agent (rosjev Agent) ── step set W1–W7                   │
+                     │    ├─ JevDecide.srv ──▶ jev (rosjev_jev)                       │
+                     │    ├─ Reason.action ──▶ llm (rosjev_llm, Haiku 5.5 low)        │
+                     │    └─ Task.action ────▶ flight_controller (C++) + safety H1–H8  │
+                     │ sensor_sim (C++) ── battery, proximity, detections, link        │
+                     └──────▲ odom/imu/altimeter/gps ───── cmd_vel ▼───────────────────┘
+                     ┌──────┴────────────────────────────────────────────────────────┐
+                     │ sim pod: Gazebo Fortress (noVNC :6080) + ros_gz_bridge         │
+                     │ environment (py)  comms_sim (C++)  mission_scorer (py → Label) │
+                     └────── rosjev base: discovery · decision_logger ────────────────┘
+```
+
+**Ground-truth isolation:** only `environment`, `sensor_sim` and `mission_scorer` subscribe to `/env/ground_truth`.
+
+**Example-specific interfaces** (`swarm_interfaces`): `Detection`, `DetectionArray`, `LinkStatus`, `DroneStatus`, `Track`, `TrackArray`, `Allocate.srv`, `Task.action`, `Formation.action`, `Mission.action`. All decision traffic uses `rosjev_interfaces`.
+
+**Containers at N = 4:** 30 services from one image.
+
+| Scope | Services |
+|---|---|
+| Base | discovery, decision_logger |
+| Sim and world | sim + bridge, environment, comms_sim, mission_scorer |
+| Per drone (×N) | flight_controller, sensor_sim, jev, llm, drone_agent |
+| Coordinator | formation_planner, jev, llm, mission_coordinator |
+
+**Kubernetes:** per-drone node types are StatefulSets whose pod ordinal gives the namespace (`uav{k+1}`).
