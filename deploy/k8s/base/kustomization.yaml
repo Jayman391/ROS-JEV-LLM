@@ -1,0 +1,27 @@
+# jev_ai framework on Kubernetes (FRAMEWORK §13): servers, logger, dashboard. Apps are overlays
+# (../overlays/toy, ../overlays/turtlesim) that add agents and set the env below.
+#
+# Keys (optional; without them use the mock/replay backends):
+#   kubectl -n jev-ai create secret generic jev-ai-keys --from-env-file=.env
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: jev-ai
+labels:
+  - pairs: {app.kubernetes.io/part-of: jev-ai}
+resources:
+  - namespace.yaml
+  - servers.yaml
+configMapGenerator:
+  - name: jev-ai-env                 # every pod's environment; overlays merge into it
+    literals:
+      - JEV_BACKEND=typesafe
+      - LLM_BACKEND=anthropic
+      - PARAMS_FILE=/ws/install/share/jev_ai_bringup/config/params.yaml
+      - RUN_ID=k8s
+      - ROS_DOMAIN_ID=0
+  - name: jev-ai-params              # site overrides, applied after PARAMS_FILE
+    files: [params.yaml]
+images:
+  - name: jev-ai
+    newName: jev-ai
+    newTag: humble

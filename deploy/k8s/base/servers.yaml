@@ -1,0 +1,119 @@
+# One Deployment per framework node. Every container gets the jev-ai-env ConfigMap and, if it
+# exists, the jev-ai-keys Secret as environment; $(VAR) in args expands from that environment.
+# Pod-to-pod DDS discovery is multicast on the pod network (single-node clusters such as Docker
+# Desktop); a multi-node cluster needs a Fast DDS Discovery Server.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jev-server
+spec:
+  selector: {matchLabels: {app: jev-server}}
+  template:
+    metadata: {labels: {app: jev-server}}
+    spec:
+      containers:
+        - name: jev-server
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_servers, jev_server, --ros-args,
+                 --params-file, $(PARAMS_FILE), --params-file, /config/params.yaml,
+                 -p, "backend:=$(JEV_BACKEND)"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+            - secretRef: {name: jev-ai-keys, optional: true}
+          volumeMounts: [{name: params, mountPath: /config}]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+      volumes: [{name: params, configMap: {name: jev-ai-params}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-server
+spec:
+  selector: {matchLabels: {app: llm-server}}
+  template:
+    metadata: {labels: {app: llm-server}}
+    spec:
+      containers:
+        - name: llm-server
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_servers, llm_server, --ros-args,
+                 --params-file, $(PARAMS_FILE), --params-file, /config/params.yaml,
+                 -p, "backend:=$(LLM_BACKEND)"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+            - secretRef: {name: jev-ai-keys, optional: true}
+          volumeMounts: [{name: params, mountPath: /config}]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+      volumes: [{name: params, configMap: {name: jev-ai-params}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decision-logger
+spec:
+  selector: {matchLabels: {app: decision-logger}}
+  strategy: {type: Recreate}            # one writer on the records volume
+  template:
+    metadata: {labels: {app: decision-logger}}
+    spec:
+      containers:
+        - name: decision-logger
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_servers, decision_logger, --ros-args,
+                 -p, "path:=/records/decisions.jsonl"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+            - secretRef: {name: jev-ai-keys, optional: true}
+          volumeMounts: [{name: records, mountPath: /records}]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+      volumes: [{name: records, persistentVolumeClaim: {claimName: jev-ai-records}}]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jev-ai-records
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+spec:
+  selector: {matchLabels: {app: dashboard}}
+  template:
+    metadata: {labels: {app: dashboard}}
+    spec:
+      containers:
+        - name: dashboard
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          # no auth: reach it with `kubectl -n jev-ai port-forward svc/dashboard 8080`
+          args: [ros2, run, jev_ai_servers, dashboard, --ros-args,
+                 --params-file, /ws/install/share/jev_ai_bringup/config/params.yaml,
+                 -p, "host:=0.0.0.0", -p, "port:=8080"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+            - secretRef: {name: jev-ai-keys, optional: true}
+          ports: [{containerPort: 8080, name: http}]
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard
+spec:
+  selector: {app: dashboard}
+  ports: [{port: 8080, targetPort: http}]

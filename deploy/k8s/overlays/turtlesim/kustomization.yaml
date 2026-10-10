@@ -1,0 +1,22 @@
+# turtlesim example (A9) on Kubernetes: turtlesim (offscreen), the arena, decide_server and three
+# turtles — Python engine, C++ client, behaviour tree. Watch decisions on the dashboard.
+#
+#   kubectl apply -k deploy/k8s/overlays/turtlesim
+#   kubectl -n jev-ai port-forward svc/dashboard 8080
+#   kubectl -n jev-ai exec deploy/turtle-arena -- /entrypoint.sh \
+#       ros2 topic pub --once /alerts geometry_msgs/msg/Point "{x: 8.0, y: 3.0}"
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - turtles.yaml
+configMapGenerator:
+  - name: jev-ai-env
+    behavior: merge
+    literals:
+      - JEV_BACKEND=mock
+      - LLM_BACKEND=mock
+      - PARAMS_FILE=/ws/install/share/jev_ai_examples/config/turtle_params.yaml
+      - RUN_ID=turtles-k8s
+      - CATALOG=/ws/install/share/jev_ai_examples/config/turtle_patrol.yaml
+      - TURTLES=[turtle1,turtle2,turtle3]   # no spaces: it is word-split in the turtle pods

@@ -1,0 +1,19 @@
+# toy_patrol on Kubernetes: the framework + a StatefulSet of patrol robots (keyless mocks).
+#
+#   kubectl apply -k deploy/k8s/overlays/toy
+#   kubectl -n jev-ai scale statefulset patrol --replicas 5
+#   kubectl -n jev-ai port-forward svc/dashboard 8080          # http://localhost:8080
+#   kubectl delete -k deploy/k8s/overlays/toy
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - patrol.yaml
+configMapGenerator:
+  - name: jev-ai-env
+    behavior: merge
+    literals:
+      - JEV_BACKEND=mock
+      - LLM_BACKEND=mock
+      - PARAMS_FILE=/ws/install/share/jev_ai_examples/config/toy_params.yaml
+      - RUN_ID=toy-k8s

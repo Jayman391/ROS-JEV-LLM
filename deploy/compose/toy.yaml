@@ -1,0 +1,31 @@
+# toy_patrol on compose: the framework services + three patrol robots, keyless mocks.
+#
+#   docker compose -f deploy/compose/toy.yaml up -d      # dashboard: http://localhost:8080
+#   docker compose -f deploy/compose/toy.yaml exec decision_logger \
+#       ros2 jev report /records/decisions.jsonl -o /records/report.html
+#   docker compose -f deploy/compose/toy.yaml down
+name: jev_ai_toy
+include:
+  - path: compose.yaml
+    env_file: toy.env
+
+x-agent: &agent
+  image: ${JEV_AI_IMAGE:-jev-ai:humble}
+  restart: unless-stopped
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  deploy:
+    resources:
+      limits: {cpus: '0.5', memory: 384M}
+
+# one service per robot: the node name is the agent name; one shared run_id couples the fleet
+services:
+  patrol_1:
+    <<: *agent
+    command: ros2 run jev_ai_examples toy_patrol --ros-args -r __node:=patrol_1 -p seed:=1 -p run_id:=toy
+  patrol_2:
+    <<: *agent
+    command: ros2 run jev_ai_examples toy_patrol --ros-args -r __node:=patrol_2 -p seed:=2 -p run_id:=toy
+  patrol_3:
+    <<: *agent
+    command: ros2 run jev_ai_examples toy_patrol --ros-args -r __node:=patrol_3 -p seed:=3 -p run_id:=toy

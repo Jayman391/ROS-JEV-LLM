@@ -1,0 +1,7 @@
+# Site parameter overrides for every jev_ai node (mounted at /config/params.yaml, applied after
+# PARAMS_FILE). Keys never go here. Example:
+#   jev_server:
+#     ros__parameters:
+#       typesafe: {model: jev-1.13.0}
+/**:
+  ros__parameters: {}

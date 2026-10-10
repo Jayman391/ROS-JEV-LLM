@@ -1,0 +1,36 @@
+# Patrol robots: the StatefulSet ordinal gives each its agent name and world seed
+# (pod patrol-2 -> node patrol_2, seed 2). Scale freely; all share RUN_ID, so they couple.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: patrol
+spec:
+  serviceName: patrol
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector: {matchLabels: {app: patrol}}
+  template:
+    metadata: {labels: {app: patrol}}
+    spec:
+      containers:
+        - name: patrol
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          command: [/entrypoint.sh, bash, -c]
+          args:
+            - >-
+              exec ros2 run jev_ai_examples toy_patrol --ros-args
+              -r __node:=${HOSTNAME//-/_} -p seed:=${HOSTNAME##*-} -p run_id:=$RUN_ID
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: patrol
+spec:
+  clusterIP: None                       # headless: required by the StatefulSet, no traffic
+  selector: {app: patrol}

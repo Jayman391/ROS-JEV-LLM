@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: turtlesim
+spec:
+  selector: {matchLabels: {app: turtlesim}}
+  template:
+    metadata: {labels: {app: turtlesim}}
+    spec:
+      containers:
+        - name: turtlesim
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, turtlesim, turtlesim_node, --ros-args, -r, "__node:=turtlesim"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: turtle-arena
+spec:
+  selector: {matchLabels: {app: turtle-arena}}
+  template:
+    metadata: {labels: {app: turtle-arena}}
+    spec:
+      containers:
+        - name: turtle-arena
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_examples, turtle_arena, --ros-args,
+                 -p, "turtles:=$(TURTLES)"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: decide-server
+spec:
+  selector: {matchLabels: {app: decide-server}}
+  template:
+    metadata: {labels: {app: decide-server}}
+    spec:
+      containers:
+        - name: decide-server
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_servers, decide_server, --ros-args,
+                 -p, "catalog:=$(CATALOG)", -p, "run_id:=$(RUN_ID)"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+---
+# turtle-0 -> turtle1, Python engine; turtle-1 -> turtle2, C++ DecisionClient; turtle-2 ->
+# turtle3, behaviour tree. Fixed at 3: the arena spawns the turtles listed in TURTLES.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: turtle
+spec:
+  serviceName: turtle
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector: {matchLabels: {app: turtle}}
+  template:
+    metadata: {labels: {app: turtle}}
+    spec:
+      containers:
+        - name: turtle
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          command: [/entrypoint.sh, bash, -c]
+          args:
+            - >-
+              i=${HOSTNAME##*-}; t=turtle$((i + 1));
+              common="-r __node:=${t}_agent -p turtle:=$t -p turtles:=$TURTLES -p run_id:=$RUN_ID";
+              case $i in
+              0) exec ros2 run jev_ai_examples turtle_agent --ros-args $common ;;
+              1) exec ros2 run jev_ai_bt turtle_agent --ros-args $common -p mode:=client ;;
+              *) exec ros2 run jev_ai_bt turtle_agent --ros-args $common -p mode:=bt ;;
+              esac
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: turtle
+spec:
+  clusterIP: None                       # headless: required by the StatefulSet, no traffic
+  selector: {app: turtle}

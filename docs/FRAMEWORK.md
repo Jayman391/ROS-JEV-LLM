@@ -25,6 +25,9 @@ export TYPESAFE_API_KEY=...  ANTHROPIC_API_KEY=...        # env only; never ROS 
 ros2 launch jev_ai_bringup bringup.launch.py               # jev_server + llm_server (+ decide_server, logger)
 ros2 jev status                                            # keys, endpoints, models, budgets
 ros2 jev ask --catalog my_catalog.yaml --set next_step --state task="patrolling" battery="low (18%)"
+ros2 jev report decisions.jsonl --labels decisions-labels.jsonl          # metrics page
+ros2 jev calibrate decisions.jsonl --labels decisions-labels.jsonl --catalog my_catalog.yaml -o calibrated.yaml
+ros2 jev ope decisions.jsonl --catalog my_catalog.yaml --labels decisions-labels.jsonl --set tau=0.3
 ```
 
 **Python, in-process.** Attaches to any `rclpy` node, including your existing one:
@@ -77,20 +80,20 @@ Mock mode needs no keys, but **only when you ask for it**: `backend:=mock`. A li
                          JevDecide.srv ──▶ jev_server  [lifecycle]  ◀──────┤ generation ids
                          Reason.action ──▶ llm_server  [lifecycle]  ◀──────┘
                                               │ backends (plugins), budgets, diagnostics
-                         DecisionRecord ──▶ decision_logger ──▶ rosbag2 / JSONL ──▶ ros2 jev calibrate | replay | ope | search
+                         DecisionRecord ──▶ decision_logger ──▶ JSONL ──▶ ros2 jev calibrate | replay | ope | search
 ```
 
 | Package | Build | Contents |
 |---|---|---|
 | `jev_ai_msgs` | ament_cmake | all interfaces (§3) |
-| `jev_ai` | ament_python | `jev_ai.core`: pure, no rclpy. Catalog and validator, fusion, coupled sampler, commitment machine, triggers, rate limiter, prompt and schema builder, calibration and OPE maths, golden vectors. `jev_ai.ros`: `DecisionEngine`, `Agent` (optional wrapper), `hierarchy`, backend interfaces |
-| `jev_ai_servers` | ament_python | lifecycle nodes `jev_server`, `llm_server`, `decide_server`, `decision_logger`; built-in backends; parameters via `generate_parameter_library` |
-| `jev_ai_cpp` | ament_cmake | `jev_ai::DecisionClient`, `JevClient`, `ReasonClient` (async, deadlines), a component example, `visibility_control.h` |
-| `jev_ai_bt` | ament_cmake | BehaviorTree.CPP v4 plugins: `JevAsk`, `Decide`, `Reason` (BehaviorTree.ROS2 wrappers, vendored) |
+| `jev_ai` | ament_python | `jev_ai.core`: pure, no rclpy. Catalog and validator, fusion, coupled sampler, commitment machine, triggers, rate limiter, prompt and schema builder, calibration and OPE maths, golden vectors. `jev_ai.ros`: `DecisionEngine`, `Hierarchy`, `run()`; backend interfaces |
+| `jev_ai_servers` | ament_python | lifecycle nodes `jev_server`, `llm_server`, `decide_server`, `decision_logger`; `dashboard`; built-in backends; declared parameters, read-only after launch |
+| `jev_ai_cpp` | ament_cmake | `jev_ai::DecisionClient`, `JevClient`, `ReasonClient` (async, deadlines), a component example (`toy_agent`) |
+| `jev_ai_bt` | ament_cmake | BehaviorTree.CPP v4 plugins: `JevAsk`, `Decide`, `Reason` on the `jev_ai_cpp` async clients (BehaviorTree.ROS2 isn't released for Humble) |
 | `ros2jev` | ament_python | ros2cli extension: `ros2 jev status \| ask \| calibrate \| replay \| ope \| search` |
 | `jev_ai_bringup` | ament_cmake | `bringup.launch.py`, default `params.yaml`, catalog template |
-| `jev_ai_examples` | mixed | `toy_patrol` (Python, C++ and BT agents, plus a supervisor), `turtlesim` (visual) |
-| `deploy/` (not a ROS package) | — | Dockerfiles per distro, compose, kustomize, Discovery Server config. Optional, never required by the library |
+| `jev_ai_examples` | ament_python | `toy_patrol` (Python agents and a supervisor; C++ and BT agents come from `jev_ai_cpp` / `jev_ai_bt`), `turtlesim` (visual), `toy_episode` (a `search` runner) |
+| `deploy/` (not a ROS package) | — | one Dockerfile (`ROS_DISTRO` build arg), compose, kustomize base + toy/turtlesim overlays. Optional, never required by the library |
 
 **One engine (D2).** There is exactly **one** decision-engine implementation, in Python.
 - Python users run it in-process.
@@ -287,6 +290,8 @@ question_sets:
         kappa: 0.7                     # hysteresis / status-quo bonus (nats)
         coupling: 0.5                  # ρ (D3): 1.0 default when answering a directive
         argmax_margin: 0.1             # hysteresis on argmax_change triggers
+        # also per question: m_irrev, coupling_directive, and the calibrated beta_min, beta_max,
+        # gamma, B, eta and bias: {class: nats}  (written by `ros2 jev calibrate`, §12)
       urgency:
         type: score
         instructions: "How urgent is resolving the detection?"
@@ -334,7 +339,6 @@ engine.completed(question)                          # current action finished �
 engine.commit_point(question)                       # `until_commit` class becomes irreversible
 ```
 
-- `Agent` is a convenience `Node` subclass that wires one engine. It is optional.
 - `decide_server` hosts one engine per `agent` key. For those engines, the encoder, mask and require inputs come from the goal, and decisions go out as action feedback and result.
 
 ### 5.2 Decision cycle
@@ -393,7 +397,7 @@ For every question type:
 
 `c = 1 − H(p_J) / log|A|`
 
-where H is the entropy of p_J over its |A| classes. The model's own confidence is kept as `source_confidence`, and it can enter calibration as a feature (A9).
+where H is the entropy of p_J over its |A| classes. The model's own confidence is kept as `source_confidence` by the backends; it is not in the records yet, so `calibrate` does not use it.
 
 ### 6.2 Pooling
 
@@ -481,7 +485,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 ## 8. Jev server (`jev_server`, lifecycle)
 
-- **Parameters** (generate_parameter_library):
+- **Parameters** (declared; read-only after launch, since parameter services are open to the graph):
   - `backend` (name)
   - `<backend>.plugin`
   - `<backend>.model` (pinned, e.g. `jev-1.13.0`)
@@ -516,7 +520,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 - **Defaults:** `model` and `effort` are per server instance, e.g. one `llm_server` with Haiku `low` and one with Sonnet `medium`. Clients pick a server by remapping.
 - **Budgets (both servers, A25):**
-  - `max_rps`, `max_tokens_per_min`, `max_usd_per_hour`, from a pricing table in config.
+  - `max_rps`, `max_tokens_per_min`. Spend (USD, from a pricing table in config) is reported, not capped, while this is a prototype.
   - A circuit breaker opens after N errors or budget exhaustion. While it is open the server rejects goals fast, and engines degrade to δ ≡ 0 (Jev only) or keep the current class (Jev).
   - Budget state is published in diagnostics and checked by `ros2 jev status`.
 - **Cancellation:** a cancelled goal aborts the HTTP stream.
@@ -547,7 +551,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 | No unbounded LLM parameters reach the app | `llm_params` clamping |
 | Stale or racing results are never applied | generation, state hash and mask hash checks |
 | No silent mock | live backends fail at configure time without a key |
-| Spend is bounded | server budgets plus the circuit breaker |
+| Spend is bounded | server rate/token budgets plus the circuit breaker (no USD cap in the prototype) |
 
 | Failure | Behaviour |
 |---|---|
@@ -558,22 +562,25 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 ## 12. Records, calibration and evaluation (`ros2jev`)
 
-- **`decision_logger`:** subscribes to `decisions` and `labels` and writes **rosbag2** (default) or JSONL. Prompts appear at DEBUG only.
-- **`ros2 jev calibrate`:** a convex **conditional-logit** fit per question type, with γ on a grid.
-  - Features: log p_J, ℓ, (1−c)^γ·ℓ, source_confidence and per-class biases b_q.
-  - It reports ECE and NLL for Jev alone, the LLM alone and the fused result, and emits a `policy:` patch (β_min, β_max, γ, b_q, B).
-- **`ros2 jev replay`:** re-asks Jev or the LLM on logged states with a variant catalog (wording, criteria, class order). It reports the shift, the labelled accuracy and **first-option bias**, and this is the gate for the status-quo-first ordering.
-- **`ros2 jev ope`:** recomputes z, s and propensities for new (β, γ, τ, κ, ρ, B) **exactly** from the logged inputs and noise.
-  - Where the new action equals the logged one, the outcome is known exactly.
-  - Otherwise it uses SNIPS or doubly robust estimates with a cluster bootstrap by group, and reports the effective sample size.
-- **`ros2 jev search`:** episode-level search (successive halving, common random numbers) through an app `EpisodeRunner`, only for parameters that OPE can't cover (dwell, deadlines, trigger cadence).
-- **Replay claim:** *per-decision* re-derivation is exact. Whole-run reproduction is not claimed.
+- **`decision_logger`:** subscribes to `decisions` and `labels` and writes JSONL (`<path>` and `<path stem>-labels.jsonl`); for rosbag2, `ros2 bag record /decisions /labels`. Prompts appear at DEBUG only.
+- **Labels** (`Label.msg`) join records on (run_id, subject or agent, decision_id, question). Apps publish them when they know the truth (`toy_patrol` publishes its world's oracle on every final decision).
+- **`ros2 jev calibrate`:** a convex **conditional-logit** fit per (question set, question) of exactly the §6.2 rule: z = log p_J (offset) + w1·ℓ·d + w2·(1−c)^γ·ℓ·d + b_q, with d = exp(−age/T_stale), so β_min = w1 and β_max = w1 + w2. Newton's method with a small ridge on b_q.
+  - γ is chosen on a grid by the NLL of the **clamped** patch (γ trades off against β_min along a flat ridge), then B on a grid of the §14 range.
+  - Reports ECE and NLL for Jev alone, the LLM alone, the logged fused result and the calibrated patch (in-sample), and writes a catalog patch or the patched catalog: per-question `beta_min`, `beta_max`, `gamma`, `B`, `bias`.
+  - Not modelled: the one-sided clip on irreversible classes (conservative), and `source_confidence` (not in the records).
+- **`ros2 jev replay`:** re-asks Jev (any backend, in-process; keys from the environment) on distinct logged states, with an optional variant catalog (wording, criteria) and with each question's classes **reversed**. It reports the shift (total variation, argmax moved), labelled accuracy, the first-option rate and the **position bias** = p(first class | listed first) − p(first class | listed last), gated at 0.05: the gate for the status-quo-first ordering. LLM replay is not built.
+- **`ros2 jev ope`:** re-derives every logged decision **exactly** from its logits, noise, τ and κ (current class = the agent's previous selection); decisions that don't reproduce were not sampled (dwell, commit hold, irreversible rule, require, fallback) and are held unchanged.
+  - Under new (β, γ, B, η, b_q, τ, κ, ρ) it recomputes logits and the selection with the **same** noise (re-keyed when ρ changes; ρ alters which noise is drawn, not propensities, so only `direct` sees it).
+  - Estimates: `direct` (labels give every class's reward: exact on the logged states), SNIPS and doubly robust (logged reward only), effective sample size, and 95% CIs by a cluster bootstrap over (run, group, epoch), the unit that shares noise.
+- **`ros2 jev search`:** episode-level successive halving with common random numbers through an app `EpisodeRunner` (`run(params, seed) -> score`), for parameters OPE can't cover (T_dwell, deadlines, tick cadence, k_max). `jev_ai_examples.toy_episode` runs the real `Commitment` machine against the toy world in simulated time (~20 ms per 10-minute episode).
+- **Replay claim:** *per-decision* re-derivation is exact. Whole-run reproduction is not claimed: a new policy visits different states, so check big changes with a re-run or `search`.
 
 ## 13. Deployment (`deploy/`, optional)
 
-- **Images:** per-distro images on `ros:<distro>-ros-base` with pinned SDKs from `requirements.txt`. A custom rosdep source provides `python3-anthropic-pip` and `python3-typesafe-sdk-pip`; there is a PEP 668 note for Jazzy.
-- **Compose:** `x-jev-ai-node` anchor, plus `jev_server`, `llm_server`, `decide_server` and `decision_logger`, plus an optional Fast DDS Discovery Server. Apps `include:` it.
-- **Kustomize:** a base (servers, logger, Secret, ConfigMap) plus components for app agents (StatefulSets, where the ordinal gives the agent name). Keys come from a k8s Secret as env vars or a mounted file.
+- **Image:** `deploy/docker/Dockerfile`, `ros:<distro>-ros-base` + rosdep + the pinned SDKs from `requirements.txt` (pip; `--break-system-packages` on Jazzy's PEP 668 Python) + the workspace. One image runs every node; Humble and Jazzy build and run the toy.
+- **Compose:** `deploy/compose/compose.yaml` (`x-jev-ai-node` anchor; `jev_server`, `llm_server`, `decision_logger`, `dashboard`, and `decide_server` under profile `decide`). Apps `include:` it with an env file (`toy.yaml` + `toy.env`). Keys come from the repo's `.env`.
+- **Kustomize:** `deploy/k8s/base` (servers, logger with a PVC, dashboard; ConfigMaps `jev-ai-env` and `jev-ai-params`; an optional `jev-ai-keys` Secret as env vars) plus overlays whose agents are StatefulSets where the ordinal gives the agent name (`toy`, `turtlesim`).
+- **DDS:** multicast discovery on the compose network and on a single-node cluster's pod network. A Fast DDS Discovery Server is needed only for multi-node clusters and is not included yet.
 
 ## 14. Parameters (defaults; catalog `policy:` and ROS params override)
 
@@ -591,7 +598,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 | `k_max` (per engine), `c_low`, `skip_llm_above_c` | 6/min, 0.5, off | | search |
 | `reuse_stale_llm` | false | | |
 | `jev_timeout`, `llm_timeout`, `N_fail` | 1 s, 6 s, 3 | | |
-| server `max_rps`, `max_tokens_per_min`, `max_usd_per_hour` | 50, 200k, 5.00 | | ops |
+| server `max_rps`, `max_tokens_per_min` | 50 (llm 10), 200k | | ops |
 
 ## 15. Non-goals (v1)
 

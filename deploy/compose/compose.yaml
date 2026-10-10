@@ -1,0 +1,63 @@
+# jev_ai framework services, one container per node (FRAMEWORK §13). Apps include this file:
+#
+#   include:
+#     - path: <repo>/deploy/compose/compose.yaml
+#       env_file: my_app.env            # JEV_BACKEND, LLM_BACKEND, JEV_AI_PARAMS, RUN_ID, ...
+#
+# Image: docker build -f deploy/docker/Dockerfile -t jev-ai:humble .
+# Keys: TYPESAFE_API_KEY / ANTHROPIC_API_KEY from the repo's .env (absent = mock/replay only).
+# DDS discovery is multicast on the compose network; add a Fast DDS Discovery Server only where
+# multicast is unavailable (multi-host).
+x-jev-ai-node: &jev-ai-node
+  image: ${JEV_AI_IMAGE:-jev-ai:humble}
+  restart: unless-stopped
+  env_file:
+    - path: ../../.env
+      required: false
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  deploy:
+    resources:
+      limits: {cpus: '0.5', memory: 512M}
+
+services:
+  jev_server:
+    <<: *jev-ai-node
+    command: >-
+      ros2 run jev_ai_servers jev_server --ros-args
+      --params-file ${JEV_AI_PARAMS:-/ws/install/share/jev_ai_bringup/config/params.yaml}
+      -p backend:=${JEV_BACKEND:-typesafe}
+
+  llm_server:
+    <<: *jev-ai-node
+    command: >-
+      ros2 run jev_ai_servers llm_server --ros-args
+      --params-file ${JEV_AI_PARAMS:-/ws/install/share/jev_ai_bringup/config/params.yaml}
+      -p backend:=${LLM_BACKEND:-anthropic}
+
+  decide_server:                       # engines for C++/BT clients: --profile decide, CATALOG=...
+    <<: *jev-ai-node
+    profiles: [decide]
+    command: >-
+      ros2 run jev_ai_servers decide_server --ros-args
+      -p catalog:=${CATALOG:-} -p run_id:=${RUN_ID:-compose}
+
+  decision_logger:
+    <<: *jev-ai-node
+    command: >-
+      ros2 run jev_ai_servers decision_logger --ros-args
+      -p path:=/records/decisions.jsonl
+    volumes:
+      - records:/records
+
+  dashboard:
+    <<: *jev-ai-node
+    command: >-
+      ros2 run jev_ai_servers dashboard --ros-args
+      --params-file /ws/install/share/jev_ai_bringup/config/params.yaml
+      -p host:=0.0.0.0 -p port:=8080
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:8080"    # no auth: host loopback only
+
+volumes:
+  records:
