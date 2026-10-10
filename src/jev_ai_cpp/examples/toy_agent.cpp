@@ -21,8 +21,10 @@ public:
   : Node("toy_agent", options), decide_(this, "next_step"),
     rng_(static_cast<unsigned>(declare_parameter("seed", 0)))
   {
+    std::seed_seq seq{static_cast<unsigned>(get_parameter("seed").as_int())};
+    rng_.seed(seq);                              // small integer seeds mix poorly in mt19937
     energy_ = std::uniform_real_distribution<double>(60, 95)(rng_);
-    decide_.on_decision([this](const jev_ai::Decision & d) {act(d);});
+    decide_.on_decision([this](const jev_ai::Decision & d) {if (!d.standing) {act(d);}});
     decide_.start(
       1.0, [this] {return encode();},
       [this] {return detection_ == "none" ? jev_ai::ClassSets{{"next_action", {"inspect"}}} :

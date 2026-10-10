@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>jev_ai_bt</name>
+  <version>0.1.0</version>
+  <description>jev_ai BehaviorTree.CPP v4 nodes (Decide, JevAsk, Reason) and a BT toy</description>
+  <maintainer email="jasonlobell123@gmail.com">Jason Lobell</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>ament_index_cpp</depend>
+  <depend>behaviortree_cpp</depend>
+  <depend>jev_ai_cpp</depend>
+  <depend>rclcpp</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

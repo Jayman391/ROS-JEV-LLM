@@ -50,6 +50,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xdotool openssl \
     && rm -rf /var/lib/apt/lists/*
 
+# BehaviorTree.CPP v4 for jev_ai_bt (own layer: keeps the big desktop layer cached)
+RUN apt-get update && apt-get install -y --no-install-recommends ros-humble-behaviortree-cpp \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY docker/entrypoint.sh docker/gui-fullscreen /usr/local/bin/
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/gui-fullscreen
 

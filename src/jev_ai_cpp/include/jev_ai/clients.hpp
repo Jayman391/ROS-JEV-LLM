@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,8 @@ struct Decision
   std::string question_set;
   jev_ai_msgs::msg::Decision msg;
   bool final = false;
+  /// A tick answered by the decision already delivered (same id and phase): nothing new to do.
+  bool standing = false;
 
   const std::string & phase() const {return msg.phase;}
   std::string selected(const std::string & question) const;     // "" if none
@@ -93,7 +96,9 @@ private:
   std::function<Classes()> require_;
   std::mutex mutex_;
   std::vector<std::string> triggers_;
-  std::atomic<uint64_t> seq_{0}, last_final_id_{0};
+  void deliver(Decision d);
+  std::pair<uint64_t, std::string> last_;          // (decision_id, phase) last delivered
+  std::atomic<uint64_t> seq_{0};
   std::atomic<bool> busy_{false};
 };
 

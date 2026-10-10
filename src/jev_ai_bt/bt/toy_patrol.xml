@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+<!-- jev_ai BT toy (A8): the toy_patrol decision loop written only in XML.
+     The app (bt_toy) keeps {state}, {mask}, {require} and {event} (a new detection) up to
+     date and provides <Act>. -->
+<root BTCPP_format="4" main_tree_to_execute="Patrol">
+  <BehaviorTree ID="Patrol">
+    <Sequence>
+      <!-- System 2 directly, once: a briefing (free text); retried while the servers start -->
+      <ForceSuccess>
+        <RetryUntilSuccessful num_attempts="10">
+          <Sequence>
+            <Sleep msec="500"/>
+            <Reason system="You are the onboard reasoning module of a patrol robot."
+                    context="Give a one-line briefing for a routine patrol." text="{briefing}"/>
+          </Sequence>
+        </RetryUntilSuccessful>
+      </ForceSuccess>
+      <Act action="briefing" note="{briefing}"/>
+      <Repeat num_cycles="-1">
+        <Sequence>
+          <!-- the full jev_ai decision: Jev + LLM fusion, masks, coupling, act-then-revise -->
+          <Decide question_set="next_step" state="{state}" mask="{mask}" require="{require}"
+                  trigger="{event}"
+                  question="next_action" selected="{next_action}" phase="{phase}"/>
+          <Fallback>
+            <Sequence>
+              <ScriptCondition code="next_action == 'inspect'"/>
+              <!-- System 1 directly: a quick typed side question -->
+              <ForceSuccess>
+                <JevAsk state="{state}" question="is_person" type="noul"
+                        instructions="Is the detection likely a person?" answer="{is_person}"/>
+              </ForceSuccess>
+              <Act action="inspect" note="{is_person}"/>
+            </Sequence>
+            <Act action="{next_action}" note="{phase}"/>
+          </Fallback>
+          <Sleep msec="1000"/>
+        </Sequence>
+      </Repeat>
+    </Sequence>
+  </BehaviorTree>
+</root>

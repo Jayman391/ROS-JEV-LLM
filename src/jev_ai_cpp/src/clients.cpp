@@ -125,28 +125,38 @@ bool DecisionClient::request(
       }
     };
   opt.feedback_callback = [this, seq](auto, const std::shared_ptr<const Decide::Feedback> fb) {
-      if (seq == seq_ && cb_) {
-        cb_(Decision{question_set_, fb->decision, false});
+      if (seq == seq_) {
+        deliver(Decision{question_set_, fb->decision, false});
       }
     };
   opt.result_callback = [this, seq](const auto & wrapped) {
       if (seq != seq_) {
         return;                                    // preempted by a newer request
       }
-      busy_ = false;
       if (wrapped.code == rclcpp_action::ResultCode::SUCCEEDED) {
-        const auto id = wrapped.result->decision.decision_id;
-        if (cb_ && id != last_final_id_.exchange(id)) {   // a tick answered by the standing
-          cb_(Decision{question_set_, wrapped.result->decision, true});   // decision: no news
-        }
+        deliver(Decision{question_set_, wrapped.result->decision, true});
       } else {
         RCLCPP_WARN(
           node_->get_logger(), "%s: decision failed %s", question_set_.c_str(),
           wrapped.result ? wrapped.result->decision.rationale.c_str() : "");
       }
+      busy_ = false;                               // after delivery: !busy && nothing = failed
     };
   client_->async_send_goal(goal, opt);
   return true;
+}
+
+void DecisionClient::deliver(Decision d)
+{
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::pair<uint64_t, std::string> key{d.msg.decision_id, d.msg.phase};
+    d.standing = key == last_;
+    last_ = key;
+  }
+  if (cb_) {
+    cb_(d);
+  }
 }
 
 void DecisionClient::start(

@@ -8,8 +8,8 @@ the Python engine's decisions: same fusion, noise, commitment, records.
 
 - A goal with triggers or a directive is a decision event. A goal with neither is a **tick**, like
   the in-process engine's ``tick_hz``: Jev is asked, and a decision happens only if an event is
-  due (§5.3: argmax change, current class masked, ...); otherwise the standing decision is the
-  result (same ``decision_id``).
+  due (§5.3: argmax change, current class masked, ...); otherwise the decision in force (the
+  latest, in any phase) is the result, with the same ``decision_id``.
 
 - A newer goal for the same (agent, question set) preempts the older one, which is aborted with
   the last decision it saw: the newest state wins.
@@ -74,7 +74,7 @@ class _Hosted:
     def __init__(self, server: 'DecideServer', agent: str):
         self.inputs: dict[str, Decide.Goal] = {}
         self.pending: dict[str, _Pending] = {}
-        self.last_final: dict[str, DecisionMsg] = {}
+        self.latest: dict[str, DecisionMsg] = {}     # the decision in force, any phase
         self.engine = DecisionEngine(
             server, server.catalog, agent=agent, run_id=server.run_id,
             encode_state=lambda qs: {kv.key: kv.value for kv in self.inputs[qs].state},
@@ -86,8 +86,7 @@ class _Hosted:
 
     def _on_decision(self, d: Decision):
         msg = to_msg(d)
-        if d.final:
-            self.last_final[d.question_set] = msg
+        self.latest[d.question_set] = msg
         p = self.pending.get(d.question_set)
         if p is None:
             return
@@ -98,10 +97,12 @@ class _Hosted:
             p.handle.publish_feedback(Decide.Feedback(decision=msg))
 
     def _on_idle(self, qs: str):
-        """A tick goal and no decision event was due: the standing decision answers it."""
+        """A tick goal and no decision event was due: the decision in force answers it. That is
+        the latest one in any phase: while augmentation is pending it is the PROVISIONAL (still
+        acted on), never the decision before it."""
         p = self.pending.get(qs)
-        if p is not None and qs in self.last_final:
-            p.finish('succeeded', self.last_final[qs])
+        if p is not None and qs in self.latest:
+            p.finish('succeeded', self.latest[qs])
 
 
 class DecideServer(Node):
