@@ -44,7 +44,9 @@ Sources: [models overview](https://platform.claude.com/docs/en/about-claude/mode
 | Project | Architecture | What we reuse |
 |---|---|---|
 | [NASA JPL ROSA](https://github.com/nasa-jpl/rosa) ([paper](https://arxiv.org/abs/2410.06472)) | A LangChain agent that wraps ROS topics, services and params as tools | Robot-specific system prompt plus a small tool vocabulary |
-| [llama_ros](https://github.com/mgonzs13/llama_ros) | llama.cpp inside ROS 2. LLM calls are **actions** (`GenerateResponse.action`), with grammar-constrained output | "LLM call = action, streamed tokens = feedback"; constrained output |
+| [llama_ros](https://github.com/mgonzs13/llama_ros) | llama.cpp inside ROS 2. LLM calls are **actions** (`GenerateResponse.action`), with grammar-constrained output. Since 2026-10-05 it also has a typed **`EvaluateDecisions` service**: local GGUF decision models ("OpenJEV", …) with CHOICE/SCORE/NOUL questions, probabilities and confidence | "LLM call = action"; jev_ai ships a **`llama_ros` Jev backend** for local/offline decisions (D4) |
+| [RobotecAI RAI](https://github.com/RobotecAI/rai) | A multi-vendor agent framework: connectors, LangChain agents, tool allow/forbid lists. It has no Anthropic vendor | Tiered models and connector abstraction; our differentiators are calibrated decisions, enforced budgets and BT nodes |
+| [ros-mcp-server](https://github.com/robotmcp/ros-mcp-server) | An MCP server over rosbridge: no code changes, but no permission enforcement | Shows the demand; we enforce masks and budgets |
 | [Auromix ROS-LLM](https://github.com/Auromix/ROS-LLM) | GPT function calling mapped onto robot motion. Stale since 2023 | — |
 | [bob_llm](https://docs.ros.org/en/rolling/p/bob_llm/) | An LLM exposed as a ROS service | — |
 | [PromptCraft-Robotics](https://github.com/microsoft/PromptCraft-Robotics) | The LLM is shown a small high-level function API (AirSim drones) | Expose *formations and actions*, never raw velocities |

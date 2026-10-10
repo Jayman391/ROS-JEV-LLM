@@ -1,6 +1,6 @@
 # Drone swarm example: decision model
 
-This is the drone swarm's use of **ros_jev_ai**. It covers the **state encoders**, the **question catalog**, how each question's output maps to actions, the triggers, the masks, and the domain-specific optimization.
+This is the drone swarm's use of **jev_ai**. It covers the **state encoders**, the **question catalog**, how each question's output maps to actions, the triggers, the masks, and the domain-specific optimization.
 
 The mechanics (fusion, sampling, commitment, the LLM contract, logging and the tuning tools) are framework features specified in [FRAMEWORK.md](../../FRAMEWORK.md). This doc only configures them. The physical model is in [SYSTEM_MODEL.md](SYSTEM_MODEL.md).
 
@@ -8,14 +8,18 @@ The mechanics (fusion, sampling, commitment, the LLM contract, logging and the t
 
 | Agent | Count | Runtime | Jev | LLM | Question sets |
 |---|---|---|---|---|---|
-| `drone_agent` | N (`/uavK`) | Python `ros_jev_ai_agent.Agent` | `jev-1.13.0` | `claude-haiku-5-5`, effort `low` | `step` (1 Hz) |
-| `mission_coordinator` | 1 | Python `ros_jev_ai_agent.Agent` (supervisor) | `jev-1.13.0` | `claude-sonnet-5-5`, effort `medium` (augmentation **and** mission planning) | `global` (0.5 Hz), `track` (per item), `report` (per item), `fit` (on allocation) |
+| `drone_agent` | N (`/uavK`) | Python node + `jev_ai.DecisionEngine` + `jev_ai.hierarchy` (worker) | `jev-1.13.0` | `claude-haiku-5-5`, effort `low` | `step` (1 Hz) |
+| `mission_coordinator` | 1 | Python node + `jev_ai.DecisionEngine` + `jev_ai.hierarchy` (supervisor) | `jev-1.13.0` | `claude-sonnet-5-5`, effort `medium` (augmentation **and** mission planning) | `global` (0.5 Hz), `track` (per item), `report` (per item), `fit` (on allocation) |
 
-- **Sampling group:** `swarm` for every agent, so they all share one seed (FRAMEWORK §6.3).
-- **Epoch:**
-  - a decision that answers a directive uses that directive's `directive_id`;
-  - any other decision uses a 5 s time bucket.
-- **Effect:** drones facing similar situations make the same choice, while a drone in a genuinely different situation still diverges.
+**Coupling** (FRAMEWORK §6.3): every agent is in group `swarm`, which shares Gumbel noise.
+
+| Question kind | ρ | Epoch |
+|---|---|---|
+| Answers a coordinator directive | 1.0 | `(coordinator, directive_id)` |
+| Autonomous decision (W1) | 0.5 | 5 s node-clock bucket |
+| Coordinator decisions (single agent) | — | coupling is moot |
+
+Drones in similar situations mostly choose alike, a drone in a genuinely different situation diverges, and half the autonomous draws stay independent. That limits swarm-wide correlated errors.
 
 ## 2. State encoders
 
@@ -53,7 +57,7 @@ All values are computed in code and passed as bucket + rounded value + unit (FRA
 
 ## 3. Question catalog
 
-The default or status-quo class is listed **first** (decided). It anchors both Jev's first-option bias and the shared-seed inverse-CDF toward "no change".
+The default or status-quo class is listed **first** (decided), which points Jev's first-option bias toward "no change". `ros2 jev replay` measures that bias. Sampling itself is order-free (Gumbel coupling), and status-quo inertia comes from κ.
 
 ### 3.1 Drone `step` (augmented; tick 1 Hz)
 
@@ -175,8 +179,8 @@ C(d, s) = w_dist·dist(d, entry(s))/D_max + w_fit·(1 − u_fit(d, s)) + w_sw·[
 - The drone is the one with the lowest opportunity cost that is energy-feasible for the relay duration.
 
 **Tuning** uses the framework tools:
-- **Labels:** `mission_scorer` publishes `Label`s for W2 and C3 (true class per track subject), which `ros-jev-ai-calibrate` fits.
-- **Episode search:** `EpisodeRunner` = one seeded mission; J from SYSTEM_MODEL §6; run with `ros-jev-ai-search`.
+- **Labels:** `mission_scorer` publishes `Label`s for W2 and C3 (true class per track subject), which `ros2 jev calibrate` fits.
+- **Episode search:** `EpisodeRunner` = one seeded mission; J from SYSTEM_MODEL §6; run with `ros2 jev search`.
 
 ## 8. Example parameters (overrides of FRAMEWORK §14)
 
@@ -187,4 +191,7 @@ C(d, s) = w_dist·dist(d, entry(s))/D_max + w_fit·(1 − u_fit(d, s)) + w_sw·[
 | `T_refresh` | 20 s | 30 s |
 | LLM timeout | 6 s | 15 s |
 | `group` / `epoch_s` | `swarm` / 5 s | `swarm` / 5 s |
+| `coupling` ρ | 1.0 directive-driven, 0.5 autonomous | — |
+| `kappa` (status-quo inertia) | 0.7 | 0.7 |
+| irreversible classes | `land_now`, `inspect` after its commit point (FRAMEWORK §6.4); H8 emergencies use `require()` | `abort`, `confirm_*` |
 | `w_dist`, `w_fit`, `w_sw`, `w_opp` | — | 1.0, 1.0, 0.3, 0.5 |

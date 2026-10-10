@@ -85,7 +85,16 @@
 | A32 | The hierarchy (Report/Directive) may belong in apps | Keep it in the framework as an **optional module** (`ros_jev_ai.hierarchy`). The swarm and toy examples use it; core users can ignore it | ADOPT |
 | A33 | Docker, k8s and the Discovery Server are not library concerns | Move them to a `ros_jev_ai_deploy` package plus examples, still shipped and maintained (your compose + k8s requirement) but never required by the library | ADOPT |
 
-## 3. Decisions to pair on
+## 3. Decisions (resolved 2026-10-10)
+
+| # | Decision |
+|---|---|
+| D1 | Package prefix becomes **`jev_ai_*`**, per REP-144 |
+| D2 | **One engine.** A decider node (`decide_server`, `Decide.action`) gives C++, BT and other clients full parity; Python also runs the engine in-process |
+| D3 | Coupling ρ **per question**: 1.0 for directive responses, 0.5 for autonomous decisions |
+| D4 | A **`llama_ros` adapter backend** for local/offline Jev-style decisions; our messages stay richer |
+
+The original options are kept below for the record.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|

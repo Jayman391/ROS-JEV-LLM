@@ -1,8 +1,8 @@
 # Drone swarm example: system model (sensor–robot–environment)
 
-This is the physical and mission model for the **reference application** of the ros_jev_ai framework. Every number here is a **parameter**: section 8 collects them, with defaults and ranges.
+This is the physical and mission model for the **reference application** of the jev_ai framework. Every number here is a **parameter**: section 8 collects them, with defaults and ranges.
 
-- [DECISION_MODEL.md](DECISION_MODEL.md) is the swarm's ros_jev_ai catalog, encoders and masks.
+- [DECISION_MODEL.md](DECISION_MODEL.md) is the swarm's jev_ai catalog, encoders and masks.
 - [FRAMEWORK.md](../../FRAMEWORK.md) is the framework itself.
 - [DESIGN.md](../../DESIGN.md) is the roadmap. This example is built last.
 
@@ -66,7 +66,7 @@ SEARCH and CONFIRM can overlap: a drone that finishes its sector early can be se
 | animal | 1–2 | moves slowly (0.3 m/s random walk) |
 | *spurious* | — | not a physical object; the detector's false positives (§4.6) |
 
-**Episode randomisation** (for evaluation, [FRAMEWORK §12](../../FRAMEWORK.md#12-observability-and-optimisation-toolkit-ros_jev_ai_tools)). An episode seed sets:
+**Episode randomisation** (for evaluation, [FRAMEWORK §12](../../FRAMEWORK.md#12-observability-and-optimisation-toolkit-jev_ai_tools)). An episode seed sets:
 - target positions and the class mix
 - wind (W ∈ [0, 8] m/s, any direction)
 - visibility
@@ -284,31 +284,31 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
 | decision | see [DECISION_MODEL §8](DECISION_MODEL.md#8-example-parameters-overrides-of-framework-14) and [FRAMEWORK §14](../../FRAMEWORK.md) | | |
 | scoring | `w_R`, `w_P`, `w_C`, `w_T`, `w_E`, `w_$` | 0.4, 0.2, 0.2, 0.1, 0.1, 10/$ | |
 
-## 9. ROS graph and containers (built on ros_jev_ai)
+## 9. ROS graph and containers (built on jev_ai)
 
 ```
                      ┌──────────────────────── /coordinator ─────────────────────────┐
- user ─Mission.action─▶ mission_coordinator (ros_jev_ai Agent, supervisor) ── FSM, tracks │
-                     │    ├─ JevDecide.srv ──▶ jev (ros_jev_ai_jev)                      │
-                     │    ├─ Reason.action ──▶ llm (ros_jev_ai_llm, Sonnet 5.5 medium)   │
+ user ─Mission.action─▶ mission_coordinator (jev_ai Agent, supervisor) ── FSM, tracks │
+                     │    ├─ JevDecide.srv ──▶ jev (jev_ai_jev)                      │
+                     │    ├─ Reason.action ──▶ llm (jev_ai_llm, Sonnet 5.5 medium)   │
                      │    └─ Formation.action / Allocate.srv ─▶ formation_planner (C++)
-                     └───────▲ ros_jev_ai Reports (via comms_sim) ── Directives ▼ ────────┘
+                     └───────▲ jev_ai Reports (via comms_sim) ── Directives ▼ ────────┘
                      ┌───────┴────────────── /uavK (×N) ───────────────▼─────────────┐
-                     │ drone_agent (ros_jev_ai Agent) ── step set W1–W7                   │
-                     │    ├─ JevDecide.srv ──▶ jev (ros_jev_ai_jev)                       │
-                     │    ├─ Reason.action ──▶ llm (ros_jev_ai_llm, Haiku 5.5 low)        │
+                     │ drone_agent (jev_ai Agent) ── step set W1–W7                   │
+                     │    ├─ JevDecide.srv ──▶ jev (jev_ai_jev)                       │
+                     │    ├─ Reason.action ──▶ llm (jev_ai_llm, Haiku 5.5 low)        │
                      │    └─ Task.action ────▶ flight_controller (C++) + safety H1–H8  │
                      │ sensor_sim (C++) ── battery, proximity, detections, link        │
                      └──────▲ odom/imu/altimeter/gps ───── cmd_vel ▼───────────────────┘
                      ┌──────┴────────────────────────────────────────────────────────┐
                      │ sim pod: Gazebo Fortress (noVNC :6080) + ros_gz_bridge         │
                      │ environment (py)  comms_sim (C++)  mission_scorer (py → Label) │
-                     └────── ros_jev_ai base: discovery · decision_logger ────────────────┘
+                     └────── jev_ai base: discovery · decision_logger ────────────────┘
 ```
 
 **Ground-truth isolation:** only `environment`, `sensor_sim` and `mission_scorer` subscribe to `/env/ground_truth`.
 
-**Example-specific interfaces** (`swarm_interfaces`): `Detection`, `DetectionArray`, `LinkStatus`, `DroneStatus`, `Track`, `TrackArray`, `Allocate.srv`, `Task.action`, `Formation.action`, `Mission.action`. All decision traffic uses `ros_jev_ai_interfaces`.
+**Example-specific interfaces** (`swarm_interfaces`): `Detection`, `DetectionArray`, `LinkStatus`, `DroneStatus`, `Track`, `TrackArray`, `Allocate.srv`, `Task.action`, `Formation.action`, `Mission.action`. All decision traffic uses `jev_ai_msgs`.
 
 **Containers at N = 4:** 30 services from one image.
 
