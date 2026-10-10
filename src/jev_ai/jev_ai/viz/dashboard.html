@@ -200,7 +200,8 @@ const S = {data: null, tab: 'live', qs: '', sel: null, pinned: null, live: false
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
-const css = (v) => `var(--${v})`;
+// record strings (e.g. phase) reach style="" through oc(): keep only identifier characters
+const css = (v) => `var(--${String(v).replace(/[^\w-]/g, '')})`;
 const oc = (o) => css('o-' + o);
 const t = (st) => st ? st.sec + st.nanosec * 1e-9 : 0;
 const wall = (r) => t(r.wall_stamp) || t(r.header && r.header.stamp);

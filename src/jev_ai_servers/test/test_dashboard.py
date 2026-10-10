@@ -18,7 +18,7 @@ from rosidl_runtime_py import set_message_fields
 
 from jev_ai.core.records import dumps
 from jev_ai.viz import sample
-from jev_ai_servers.dashboard import Dashboard
+from jev_ai_servers.dashboard import Dashboard, _host_ok
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -118,3 +118,12 @@ def test_records_path_preload(records, tmp_path):
         assert 0 < len(state['records']) <= len(records)
     finally:
         stop(node, pub_node, ex)
+
+
+def test_host_header_guard():
+    local = {'localhost', '127.0.0.1', '::1'}
+    for ok in ('localhost:8080', '127.0.0.1', '[::1]:8080', 'LOCALHOST'):
+        assert _host_ok(ok, local), ok
+    for bad in ('evil.example:8080', 'localhost.evil.example', '', '10.0.0.5:8080'):
+        assert not _host_ok(bad, local), bad          # DNS rebinding: attacker's name, our IP
+    assert _host_ok('robot-7:8080', {'*'})

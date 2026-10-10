@@ -11,6 +11,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
+from launch.substitutions import EnvironmentVariable
 from launch.substitutions import LaunchConfiguration as Arg
 from launch_ros.actions import Node
 
@@ -28,6 +29,9 @@ def generate_launch_description():
         DeclareLaunchArgument('logger', default_value='true'),
         DeclareLaunchArgument('dashboard', default_value='true'),
         DeclareLaunchArgument('dashboard_port', default_value='8080'),
+        # no auth: loopback unless told otherwise (compose sets 0.0.0.0 behind a loopback port)
+        DeclareLaunchArgument('dashboard_host', default_value=EnvironmentVariable(
+            'JEV_AI_DASHBOARD_HOST', default_value='127.0.0.1')),
         Node(package='jev_ai_servers', executable='jev_server', name='jev_server', output='screen',
              parameters=[params, {'backend': Arg('jev_backend')}]),
         Node(package='jev_ai_servers', executable='llm_server', name='llm_server', output='screen',
@@ -35,6 +39,6 @@ def generate_launch_description():
         Node(package='jev_ai_servers', executable='decision_logger', name='decision_logger',
              output='screen', parameters=[params], condition=IfCondition(Arg('logger'))),
         Node(package='jev_ai_servers', executable='dashboard', name='dashboard', output='screen',
-             parameters=[params, {'port': Arg('dashboard_port')}],
+             parameters=[params, {'port': Arg('dashboard_port'), 'host': Arg('dashboard_host')}],
              condition=IfCondition(Arg('dashboard'))),
     ])

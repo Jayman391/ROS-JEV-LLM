@@ -132,6 +132,40 @@ def test_breaker_open_rejects_goals():
         h.close()
 
 
+def test_spend_guards_fail_closed():
+    h = Harness(backend='mock', max_tokens=100, **{'mock.latency_s': 0.0})
+    try:
+        s = h.server
+        haiku = s.price('claude-haiku-5-5', 10**6, 0)
+        assert s.price('claude-haiku-5-5-20261001', 10**6, 0) == haiku          # dated id
+        assert s.price('some-new-model', 10**6, 0) == s.pricing['claude-opus-5-5'][0]
+        s.pricing = {}
+        assert s.price('anything', 1, 1) == float('inf')
+
+        # a goal may lower max_tokens but never raise it past the server's ceiling
+        seen = []
+        real = s.backend.reason
+
+        async def spy(req, feedback):
+            seen.append(req.options['max_tokens'])
+            return await real(req, feedback)
+        s.backend.reason = spy
+        for asked in ('100000', '7', 'lots'):
+            h.result(h.send(system='s', context=CONTEXT, response_schema=SCHEMA,
+                            options=[KeyValue(key='max_tokens', value=asked)]))
+        assert seen == ['100', '7', '100']
+
+        # parameters are launch-time only: no runtime redirect of record_path and friends
+        res = s.set_parameters([Parameter('record_path', value='/tmp/pwn')])
+        assert not res[0].successful and s.p('record_path') == ''
+
+        # a NaN cost must close the budget, not disable it
+        s.budget.record(time.monotonic(), 1, float('nan'))
+        assert s.budget.admit(time.monotonic()) == 'budget: max_usd_per_hour'
+    finally:
+        h.close()
+
+
 def test_anthropic_without_key_fails_configure(monkeypatch):
     monkeypatch.delenv('ANTHROPIC_API_KEY', raising=False)
     node = LlmServer(parameter_overrides=[Parameter('autostart', value=False)])

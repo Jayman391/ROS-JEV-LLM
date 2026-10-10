@@ -1,7 +1,8 @@
 """Lifecycle base shared by jev_server and llm_server (§8, §9).
 
 Owns everything that is not endpoint-specific:
-- parameters (generic ones declared here; backend ones read by prefix, e.g. ``mock.seed``);
+- parameters (generic ones declared here; backend ones read by prefix, e.g. ``mock.seed``),
+  read-only after launch;
 - backend loading by name (entry points), API keys (env or file, never params), configure-time
   ``check()``, and "no silent mock": a backend with ``key_env`` fails to configure without a key;
 - budgets, the circuit breaker, deadlines and retries around every backend call (``call()``);
@@ -19,6 +20,7 @@ from collections import deque
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
+from rcl_interfaces.msg import SetParametersResult
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.lifecycle import Node as LifecycleNode
@@ -56,6 +58,11 @@ class BackendServer(LifecycleNode):
         for k, v in {**PARAMS, 'backend': self.DEFAULT_BACKEND, **self.DEFAULTS}.items():
             if not self.has_parameter(k):
                 self.declare_parameter(k, v)
+        # Launch-time config only. The parameter services are open to the whole ROS graph, and
+        # record_path / api_key_file / <backend>.base_url set at runtime would let any peer write
+        # files or ship a file's contents to its own host as an "API key".
+        self.add_on_set_parameters_callback(lambda _: SetParametersResult(
+            successful=False, reason=f'{name} parameters are read-only; set them at launch'))
         self.cb_group = ReentrantCallbackGroup()
         self.loop = AsyncLoop()
         self.backend = None

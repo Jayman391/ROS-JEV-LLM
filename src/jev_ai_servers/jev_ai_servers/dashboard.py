@@ -3,8 +3,9 @@
 Subscribes ``decisions`` (DecisionRecord), ``labels`` (Label) and ``/diagnostics``, keeps the
 last ``max_records`` records, and serves ``jev_ai/viz/dashboard.html`` at ``/`` and the page's
 data at ``/api/state``: recent records, latest diagnostics per status name, and
-``metrics.compute`` over everything kept (cached ~2 s). Read-only; no auth, so bind ``host`` to
-127.0.0.1 where the network is untrusted.
+``metrics.compute`` over everything kept (cached ~2 s). Read-only and without auth, so ``host``
+defaults to 127.0.0.1 (in a container, bind 0.0.0.0 and publish the port on the host's loopback).
+Requests whose Host header is not in ``allowed_hosts`` get 403, which stops DNS rebinding.
 
     ros2 run jev_ai_servers dashboard --ros-args -p port:=8080 -p records_path:=decisions.jsonl
 """
@@ -40,7 +41,10 @@ class Dashboard(Node):
     def __init__(self, **kwargs):
         super().__init__('dashboard', **kwargs)
         param = lambda name, value: self.declare_parameter(name, value).value   # noqa: E731
-        host, port = param('host', '0.0.0.0'), param('port', 8080)
+        host, port = param('host', '127.0.0.1'), param('port', 8080)
+        # '*' allows any Host (only behind a trusted proxy); add the robot's name/IP for LAN use
+        self.allowed_hosts = {h.strip().lower() for h in
+                              param('allowed_hosts', 'localhost,127.0.0.1,::1').split(',')}
         self.records = deque(maxlen=param('max_records', 5000))
         self.labels = deque(maxlen=self.records.maxlen)
         path = param('records_path', '')
@@ -107,11 +111,20 @@ class Dashboard(Node):
         super().destroy_node()
 
 
+def _host_ok(header: str, allowed: set[str]) -> bool:
+    """Host header without port ('[::1]:8080' -> '::1') is in ``allowed``, or '*' is."""
+    h = header.strip().lower()
+    h = h[1:h.find(']')] if h.startswith('[') else h.rsplit(':', 1)[0] if h.count(':') == 1 else h
+    return '*' in allowed or h in allowed
+
+
 def _handler(node: Dashboard):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             route = self.path.split('?', 1)[0]
-            if route in ('/', '/index.html'):
+            if not _host_ok(self.headers.get('Host', ''), node.allowed_hosts):
+                self._send(403, 'text/plain', b'host not allowed (dashboard allowed_hosts)')
+            elif route in ('/', '/index.html'):
                 self._send(200, 'text/html; charset=utf-8', node.page)
             elif route == '/api/state':
                 body = json.dumps(node.state(), separators=(',', ':')).encode()

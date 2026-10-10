@@ -117,3 +117,4 @@ docs/
 | 2026-10-10 | A4 (paired): a model refusal or a `max_tokens` truncation gets its own error (not "invalid JSON"), and is not retried |
 | 2026-10-10 | A5 (paired): an `until_commit` class past `commit_point()` is **held** (path `committed`) until `completed()`; masks, `require`, and a *different* irreversible class winning §6.4 still override it |
 | 2026-10-10 | A5.5 added: metrics over DecisionRecords + dashboard Metrics tab + `ros2 jev report` |
+| 2026-10-10 | Security review: server params are read-only after launch (the ROS param services are open to any peer); spend guards fail closed (unknown model → highest listed rate, NaN cost closes the budget, `max_tokens` is a ceiling); dashboard binds 127.0.0.1 by default (compose: 0.0.0.0 behind a loopback port) and checks the Host header; record strings never reach `style=` unsanitized |

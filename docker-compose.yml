@@ -16,6 +16,9 @@ services:
       # Gazebo GUI in a VM has no GPU; software rendering avoids GL failures
       - LIBGL_ALWAYS_SOFTWARE=1
       - ROS_DOMAIN_ID=0
+      # the dashboard has no auth: bind all interfaces inside the container only because
+      # the port above is published on the host's loopback
+      - JEV_AI_DASHBOARD_HOST=0.0.0.0
     # Stay running so you can attach shells with `docker compose exec`.
     # Gazebo and ROS nodes started in different shells share one container,
     # so they see each other's topics.

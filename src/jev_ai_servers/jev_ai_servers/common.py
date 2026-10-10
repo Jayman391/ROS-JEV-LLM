@@ -6,6 +6,7 @@ import asyncio
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 import threading
 from collections import deque
@@ -50,6 +51,9 @@ class Budget:
         return ''
 
     def record(self, now: float, tokens: float, usd: float) -> None:
+        # Fail closed: one NaN would make every later `>= max` comparison False for an hour.
+        tokens = tokens if math.isfinite(tokens) and tokens >= 0 else math.inf
+        usd = usd if math.isfinite(usd) and usd >= 0 else math.inf
         self._tok.append((now, tokens))
         self._usd.append((now, usd))
 

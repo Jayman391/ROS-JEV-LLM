@@ -57,5 +57,6 @@ decision_logger:
 
 dashboard:
   ros__parameters:
-    host: 0.0.0.0
+    # host comes from launch arg dashboard_host (env JEV_AI_DASHBOARD_HOST, default 127.0.0.1)
+    allowed_hosts: localhost,127.0.0.1,::1   # Host headers served (DNS-rebinding guard); '*' = any
     max_records: 5000
