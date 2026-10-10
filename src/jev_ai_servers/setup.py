@@ -35,6 +35,7 @@ setup(
         'console_scripts': [
             'jev_server = jev_ai_servers.jev_server:main',
             'llm_server = jev_ai_servers.llm_server:main',
+            'decide_server = jev_ai_servers.decide_server:main',
             'decision_logger = jev_ai_servers.decision_logger:main',
             'dashboard = jev_ai_servers.dashboard:main',
         ],

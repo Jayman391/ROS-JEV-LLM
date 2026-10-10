@@ -51,6 +51,9 @@ class Decision:
     flags: list[str] = field(default_factory=list)   # e.g. option_missing (§7)
     final: bool = False
     degraded: bool = False
+    generation: int = 0
+    act: bool = True                 # False only for KEPT/COMMITTED-after-REVISED (all_phases)
+    fused: dict[str, tuple[list[str], list[float]]] = field(default_factory=dict)
 
 
 class _Set:
@@ -77,9 +80,15 @@ class _Set:
         self.goal = None                         # in-flight Reason goal handle
         self.llm_params = {n: d for n, (_, _, d) in qset.llm_params.items()}
         self.history: deque[str] = deque(maxlen=3)
+        self.subject = ''
+        self.directive: tuple[str, int] = ('', 0)   # (issuer, id) of the directive being answered
 
 
 class DecisionEngine:
+    """``autonomous=False`` (decide_server): no ticks, no start/periodic events; decisions happen
+    only on ``trigger()``. ``all_phases``: ``on_decision`` also receives the non-acting KEPT and
+    COMMITTED steps (``Decision.act`` is False), so a host can finish its goals."""
+
     def __init__(self, node, catalog: str | dict | Catalog,
                  encode_state: Callable[[str], dict[str, str]],
                  mask: Callable[[str], dict[str, set[str]]] | None = None,
@@ -88,11 +97,15 @@ class DecisionEngine:
                  on_degraded: Callable[[str], None] | None = None,
                  jev: str = 'jev/decide', llm: str = 'llm/reason',
                  group: str | None = None, run_id: str | None = None, agent: str | None = None,
-                 policy: dict | None = None):
+                 policy: dict | None = None, current: Callable[[str], dict[str, str]] | None = None,
+                 autonomous: bool = True, all_phases: bool = False,
+                 on_idle: Callable[[str], None] | None = None):
         self.node = node
         self.cat = catalog if isinstance(catalog, Catalog) else load_catalog(catalog, policy)
         self.encode, self.mask, self.require = encode_state, mask, require
-        self.on_decision, self.on_degraded = on_decision, on_degraded
+        self.current_cb = current
+        self.autonomous, self.all_phases = autonomous, all_phases
+        self.on_decision, self.on_degraded, self.on_idle = on_decision, on_degraded, on_idle
         self.agent = agent or node.get_fully_qualified_name()
         self.run_id = run_id or uuid.uuid4().hex[:12]
         self.log = node.get_logger()
@@ -108,17 +121,36 @@ class DecisionEngine:
             m = Commitment(qs, agent=self.agent, run_id=self.run_id, group=group)
             s = self.sets[name] = _Set(qs, m, qs.policy.k_max)
             s.system = system_prompt(qs, self.agent)
-            s.triggers.append('start')
+            if autonomous:
+                s.triggers.append('start')
         self.timer = node.create_timer(TICK_S, self._tick, callback_group=cbg)
 
     # --- app API (§5.1) --------------------------------------------------------------------------
 
-    def trigger(self, name: str, qset: str | None = None, priority: str = '') -> None:
-        """An app event: a decision event at the next Jev answer (asked immediately)."""
+    def trigger(self, name: str, qset: str | None = None, priority: str = '', *,
+                fresh: bool = False, subject: str = '',
+                directive: tuple[str, int] | None = None) -> None:
+        """An app event: a decision event at the next Jev answer (asked immediately).
+
+        ``name=''``: no trigger, just a tick: ask Jev and decide only if a decision event is due
+        (``on_idle(qset)`` is called when none is).
+        ``fresh``: drop an in-flight Jev answer and re-encode now (the state just changed).
+        ``directive``: (issuer, id) when this decision answers a directive; its noise epoch is
+        the directive's (§6.3), so every worker answering it shares the group noise.
+        A name containing ':' (``directive:goto``) is recorded as is, otherwise as ``app:<name>``.
+        """
         with self.lock:
             for s in self._targets(qset):
-                s.triggers.append(f'app:{name}')
+                if name:                                         # '' = a tick: ask Jev only
+                    s.triggers.append(name if ':' in name else f'app:{name}')
                 s.app_priority = max(s.app_priority, priority, key=_prio_rank)
+                if subject:
+                    s.subject = subject
+                if directive:
+                    s.directive = directive
+                if fresh:
+                    s.jev_seq += 1
+                    s.jev_sent = None
                 self._ask_jev(s)
 
     def completed(self, question: str) -> None:
@@ -158,6 +190,8 @@ class DecisionEngine:
                     s.jev_seq += 1                               # abandon the late answer
                     s.jev_sent = None
                     self._on_jev(s, None, {'error': 'jev timeout'})
+                if not self.autonomous:
+                    continue                                     # the host decides when
                 if s.last_refresh is None:
                     s.last_refresh = now
                 elif now - s.last_refresh >= pol.T_refresh:
@@ -218,15 +252,25 @@ class DecisionEngine:
             for qn in p) or any(cur.get(qn) in m for qn, m in masked.items()) or any(
             cur.get(qn) != c for qn, c in required.items())
         if not due or not s.state:
+            if self.on_idle:
+                self.on_idle(s.qset.name)
             return
         if not p and meta.get('error'):
             self.log.warning(f'{s.qset.name}: {meta["error"]}', throttle_duration_sec=5.0)
         triggers, s.triggers = s.triggers, []
         prio, s.app_priority = s.app_priority, ''
+        (issuer, did), s.directive = s.directive, ('', 0)
         s.last_p.update(p)
         s.jev_meta = meta
+        current = None
+        if self.current_cb:
+            try:
+                current = self.current_cb(s.qset.name) or None
+            except Exception as e:                               # noqa: BLE001 - app callback
+                self.log.error(f'{s.qset.name}: current failed: {e}')
         step = s.m.on_event(now, state=dict(s.state), p_jev=p, masked=masked, required=required,
-                            triggers=triggers, app_priority=prio)
+                            triggers=triggers, app_priority=prio, current=current,
+                            directive_issuer=issuer, directive_id=did)
         self._apply(s, [step])
         if step.request_llm:
             self._ask_llm(s, step, p, masked, now, pol)
@@ -303,7 +347,7 @@ class DecisionEngine:
             rec = record_dict(step, question_set=s.qset.name, agent=self.agent,
                               run_id=self.run_id, group=s.m.group, state=s.state,
                               t_node=self._now(), t_wall=time.time(),
-                              catalog_hash=self.cat.catalog_hash,
+                              catalog_hash=self.cat.catalog_hash, subject=s.subject,
                               policy_hash=self.cat.policy_hash, jev=s.jev_meta, llm=llm_meta)
             msg = DecisionRecord()
             set_message_fields(msg, copy.deepcopy(rec))          # Humble mutates nested lists
@@ -313,12 +357,14 @@ class DecisionEngine:
                     f'{q}={c}' for q, c in step.selected.items()))
             if step.degraded and self.on_degraded:
                 self.on_degraded(s.qset.name)
-            if step.act and self.on_decision:
+            if (step.act or self.all_phases) and self.on_decision:
                 values = {k: v for t in step.traces.values() for k, v in t.values.items()}
                 self.on_decision(Decision(
                     s.qset.name, step.decision_id, step.phase, dict(step.selected), values,
                     dict(s.llm_params), (llm_meta or {}).get('rationale', ''),
-                    list((llm_meta or {}).get('flags', [])), step.final, step.degraded))
+                    list((llm_meta or {}).get('flags', [])), step.final, step.degraded,
+                    step.generation, step.act,
+                    {qn: (list(t.classes), list(t.fused)) for qn, t in step.traces.items()}))
 
 
 def _prio_rank(p: str) -> int:

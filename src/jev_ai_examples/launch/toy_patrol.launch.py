@@ -2,7 +2,11 @@
 
     ros2 launch jev_ai_examples toy_patrol.launch.py                    # 3 robots, mock Jev + LLM
     ros2 launch jev_ai_examples toy_patrol.launch.py agents:=5 llm_backend:=anthropic
+    ros2 launch jev_ai_examples toy_patrol.launch.py agents:=1 cpp_agents:=2   # + C++ agents
     # dashboard: http://localhost:8080   records: /tmp/jev_ai/toy_patrol.jsonl
+
+Python agents host their engine in-process; C++ agents (jev_ai_cpp toy_agent) reach the same
+engine through decide_server, which starts when cpp_agents > 0.
 """
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -13,25 +17,32 @@ from launch_ros.actions import Node
 
 BRINGUP = get_package_share_directory('jev_ai_bringup')
 EXAMPLES = get_package_share_directory('jev_ai_examples')
+CATALOG = EXAMPLES + '/config/toy_patrol.yaml'
 
 
 def agents(context):
     n = int(Arg('agents').perform(context))
-    return [Node(package='jev_ai_examples', executable='toy_patrol', name=f'patrol_{i}',
-                 output='screen', parameters=[{'seed': i}]) for i in range(1, n + 1)]
+    n_cpp = int(Arg('cpp_agents').perform(context))
+    nodes = [Node(package='jev_ai_examples', executable='toy_patrol', name=f'patrol_{i}',
+                  output='screen', parameters=[{'seed': i}]) for i in range(1, n + 1)]
+    nodes += [Node(package='jev_ai_cpp', executable='toy_agent', name=f'cpp_patrol_{i}',
+                   output='screen', parameters=[{'seed': 100 + i}])
+              for i in range(1, n_cpp + 1)]
+    return [IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(BRINGUP + '/launch/bringup.launch.py'),
+        launch_arguments={'jev_backend': Arg('jev_backend'),
+                          'llm_backend': Arg('llm_backend'),
+                          'dashboard_port': Arg('dashboard_port'),
+                          'catalog': CATALOG if n_cpp else '',
+                          'params_file': EXAMPLES + '/config/toy_params.yaml'}.items())] + nodes
 
 
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('agents', default_value='3'),
+        DeclareLaunchArgument('cpp_agents', default_value='0'),
         DeclareLaunchArgument('jev_backend', default_value='mock'),
         DeclareLaunchArgument('llm_backend', default_value='mock'),
         DeclareLaunchArgument('dashboard_port', default_value='8080'),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(BRINGUP + '/launch/bringup.launch.py'),
-            launch_arguments={'jev_backend': Arg('jev_backend'),
-                              'llm_backend': Arg('llm_backend'),
-                              'dashboard_port': Arg('dashboard_port'),
-                              'params_file': EXAMPLES + '/config/toy_params.yaml'}.items()),
         OpaqueFunction(function=agents),
     ])
