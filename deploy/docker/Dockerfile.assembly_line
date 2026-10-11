@@ -1,0 +1,23 @@
+# Assembly line image: the jev_ai runtime image + RViz and the example packages, plus Xvfb/noVNC
+# so the viz container can show the line in a browser. No physics engine: line_sim is a
+# discrete-event simulator.
+#
+#   docker build -f deploy/docker/Dockerfile -t jev-ai:humble .
+#   docker build -f deploy/docker/Dockerfile.assembly_line -t jev-ai-line:humble .
+ARG BASE=jev-ai:humble
+FROM ${BASE}
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-rviz2 xvfb x11vnc novnc websockify libgl1-mesa-dri openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY examples/assembly_line/ examples/assembly_line/
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && source /ws/install/setup.bash \
+    && colcon build --merge-install --base-paths examples/assembly_line \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    && rm -rf build log
+
+# the dev image's virtual display + noVNC (http://<host>:6080/vnc.html); used by the viz container
+COPY docker/entrypoint.sh /gui.sh
+ENV LIBGL_ALWAYS_SOFTWARE=1

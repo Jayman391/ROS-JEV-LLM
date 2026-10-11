@@ -1,0 +1,28 @@
+# Assembly line on Kubernetes: the jev_ai framework + line_sim + 5 arms + QA + supervisor
+# (keyless mocks).
+#
+#   docker build -f deploy/docker/Dockerfile.assembly_line -t jev-ai-line:humble .  # after jev-ai:humble
+#   kubectl apply -k deploy/k8s/overlays/assembly_line
+#   kubectl -n jev-ai port-forward svc/dashboard 8080      # decisions + line status
+#   kubectl -n jev-ai port-forward svc/viz 6082:6080       # line view: http://localhost:6082/vnc.html
+#   kubectl -n jev-ai logs deploy/viz | grep noVNC         # its password
+#   kubectl delete -k deploy/k8s/overlays/assembly_line
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+  - line.yaml
+configMapGenerator:
+  - name: jev-ai-env
+    behavior: merge
+    literals:
+      - JEV_BACKEND=mock
+      - LLM_BACKEND=mock
+      - PARAMS_FILE=/ws/install/share/assembly_line/config/line_params.yaml
+      - RUN_ID=line-k8s
+      - SEED=0
+      - SCENARIO=/ws/install/share/assembly_line/config/scenario.yaml
+images:
+  - name: jev-ai                     # every pod: jev_server imports the line's mock rules
+    newName: jev-ai-line
+    newTag: humble

@@ -1,0 +1,124 @@
+# Assembly line workloads. $(VAR) expands from jev-ai-env. Every agent runs on sim time; line_sim
+# owns /clock.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: line
+spec:
+  selector: {matchLabels: {app: line}}
+  template:
+    metadata: {labels: {app: line}}
+    spec:
+      containers:
+        - name: line-sim
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, line_control, line_sim, --ros-args, --params-file, $(SCENARIO),
+                 -p, "seed:=$(SEED)"]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 50m, memory: 96Mi}, limits: {cpu: 500m, memory: 256Mi}}
+        - name: line-scorer
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, assembly_line, line_scorer, --ros-args, -p, use_sim_time:=true,
+                 -p, "seed:=$(SEED)", -p, "run_id:=$(RUN_ID)", -p, "summary_path:=/records/episode.json"]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          volumeMounts: [{name: records, mountPath: /records}]
+          resources: {requests: {cpu: 20m, memory: 96Mi}, limits: {cpu: 300m, memory: 256Mi}}
+      volumes: [{name: records, persistentVolumeClaim: {claimName: jev-ai-records}}]
+---
+# the supervisor + its own LLM server (Sonnet 5.5, effort medium), and QA
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supervisor
+spec:
+  selector: {matchLabels: {app: supervisor}}
+  template:
+    metadata: {labels: {app: supervisor}}
+    spec:
+      containers:
+        - name: line-supervisor
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, assembly_line, line_supervisor, --ros-args, -r, decisions:=/decisions,
+                 -r, reports:=/line/reports, -r, directives:=/line/directives,
+                 -p, use_sim_time:=true, -p, "seed:=$(SEED)", -p, "run_id:=$(RUN_ID)"]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 384Mi}}
+        - name: supervisor-llm
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_servers, llm_server, --ros-args, -r, __ns:=/line_supervisor,
+                 --params-file, $(PARAMS_FILE), -p, "backend:=$(LLM_BACKEND)"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+            - secretRef: {name: jev-ai-keys, optional: true}
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
+        - name: qa-agent
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, assembly_line, qa_agent, --ros-args, -r, decisions:=/decisions,
+                 -r, reports:=/line/reports, -r, directives:=/line/directives,
+                 -p, use_sim_time:=true, -p, "seed:=$(SEED)", -p, "run_id:=$(RUN_ID)"]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 384Mi}}
+---
+# One pod per arm: pod arm-K is the K-th arm in scenario.yaml (arm-0 -> /arm_a ...).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: arm
+spec:
+  serviceName: arm
+  replicas: 5
+  podManagementPolicy: Parallel
+  selector: {matchLabels: {app: arm}}
+  template:
+    metadata: {labels: {app: arm}}
+    spec:
+      containers:
+        - name: arm-agent
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          command: [/entrypoint.sh, bash, -c]
+          args:
+            - >-
+              names=(arm_a arm_b arm_c arm_d arm_e);
+              exec ros2 run assembly_line arm_agent --ros-args
+              -r __ns:=/${names[${HOSTNAME##*-}]} -r decisions:=/decisions
+              -r reports:=/line/reports -r directives:=/line/directives
+              -p use_sim_time:=true -p seed:=$SEED -p run_id:=$RUN_ID
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 384Mi}}
+---
+# RViz line view on noVNC
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: viz
+spec:
+  selector: {matchLabels: {app: viz}}
+  template:
+    metadata: {labels: {app: viz}}
+    spec:
+      containers:
+        - name: viz
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [/gui.sh, ros2, run, rviz2, rviz2, -d,
+                 /ws/install/share/assembly_line/config/line.rviz, --ros-args, -p,
+                 use_sim_time:=true]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          ports: [{containerPort: 6080, name: novnc}]
+          resources:
+            requests: {cpu: 200m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: viz
+spec:
+  selector: {app: viz}
+  ports: [{port: 6080, targetPort: novnc, name: novnc}]

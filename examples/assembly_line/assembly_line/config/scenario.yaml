@@ -1,0 +1,65 @@
+# Assembly line scenario (SYSTEM_MODEL): one parameter file for every node, C++ and Python.
+# Python reads the same file (assembly_line.scenario.load).
+/**:
+  ros__parameters:
+    seed: 0                       # episode seed: wear rates, fast-wearing arm, grips, jams, dropouts
+    t_max_s: 1500.0               # sim s: the shift
+    real_time_factor: 4.0         # sim s per wall s. LLM latency is wall time: catalogs' T_wait
+                                  # (sim s) = llm_timeout x this + 0.5. Change them together.
+    clock_step_s: 0.25            # coarse: /clock costs every rclpy node a callback per step
+    # line (§1-§2)
+    arms: [arm_a, arm_b, arm_c, arm_d, arm_e]
+    arm_station: [1, 2, 3, 3, 4]
+    arm_tools: ["pick,screw,insert", "weld,screw", "pick,insert,hold", "hold,screw,glue",
+                "glue,weld,pick"]
+    n_stations: 4
+    products: [A, B, C]
+    recipes: ["pick,screw,weld,glue", "pick,insert,fasten,screw,weld",
+              "pick,weld,glue,insert,fasten,screw"]
+    order_counts: [10, 8, 6]
+    op_kinds: [pick, screw, weld, glue, insert, fasten]
+    op_time_s: [6.0, 8.0, 12.0, 10.0, 7.0, 10.0]
+    qa_sigma: [0.08, 0.05, 0.06, 0.08, 0.08, 0.05]
+    buffer_cap: 2
+    travel_s: 4.0
+    rework_lane_s: 20.0
+    qa_s: 5.0
+    regrip_s: 3.0
+    tool_change_s: 25.0
+    # truth and faults (§3-§5): calibration knobs
+    q_min: 0.75
+    jam_p0: 0.01
+    jam_p1: 0.04
+    jam_reset_min: 30.0
+    jam_reset_max: 90.0
+    wear_rate_min: 0.006
+    wear_rate_max: 0.015
+    wear_fast_mult: 2.5
+    p_grip_marginal: 0.10
+    p_grip_slip: 0.05
+    p_misalign: 0.06
+    dropouts: 2
+    dropout_s: 40.0
+    # supervisor (DECISION_MODEL §3)
+    wip_cap: 6
+    wip_slow: 3
+    backlog_s: 60.0
+    pause_s: 90.0
+    # arms (§4)
+    pose_tol_mm: 2.0
+    wear_high: 0.6
+    max_regrips: 2
+    min_ops_between_changes: 5
+    coop_late_s: 6.0
+    coop_max_s: 40.0
+    # QA (§5)
+    ok_min: 0.8
+    max_reworks: 2
+    # scoring (SYSTEM_MODEL §8)
+    w_good: 10.0
+    w_on_time: 3.0
+    w_escaped: 40.0
+    w_scrap_good: 10.0
+    w_scrap_bad: 3.0
+    w_quarantine: 5.0
+    w_usd: 10.0

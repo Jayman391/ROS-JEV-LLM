@@ -268,11 +268,14 @@ class LineSim : public rclcpp::Node {
       s.where = line_->where(pt);
       s.state = pt.st == line::Part::QUEUED ? "queued" : pt.st == line::Part::SLOT ? "slot" :
                 pt.st == line::Part::TRANSIT ? "transit" : "lane";
+      s.stop = pt.st == line::Part::LANE ? 0 : pt.stop;
       s.next_op = static_cast<int>(pt.k);
       s.n_ops = static_cast<int>(pt.ops.size());
       s.next_kind = pt.k < pt.ops.size() ? pt.ops[pt.k].kind : "";
-      for (const auto& op : pt.ops)
+      for (const auto& op : pt.ops) {
+        s.kinds.push_back(op.kind);
         s.route.push_back(op.partner.empty() ? op.arm : op.arm + "+" + op.partner);
+      }
       s.reworks = pt.reworks;
       s.released_s = pt.released;
       m.parts.push_back(s);

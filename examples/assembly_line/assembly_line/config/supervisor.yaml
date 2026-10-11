@@ -1,0 +1,56 @@
+# Line supervisor catalog (DECISION_MODEL §3). Status-quo class first. Every set is event-driven
+# (tick_hz 0); the supervisor passes current= so each item (release slot, arm) starts from the
+# status quo, not from the last item's answer.
+catalog_version: 1
+name: line_supervisor
+question_sets:
+  release:                                           # §3.1
+    state_keys: [orders, routes, line, time]
+    llm:
+      use: when_unsure
+      system: "You are the release planner of {agent}, the supervisor of a five-arm assembly line. You choose which product the line starts next. Ship good parts on time; do not feed work the line cannot currently build."
+    questions:
+      next_product:
+        type: choice
+        instructions: "The feeder is free. Which product should the line start next?"
+        classes:
+          - {name: hold, criteria: "Release nothing now: the line is congested, the products still needed are blocked, or nothing is left to build."}
+          - {name: A, criteria: "Start one unit of product A (pick, screw, weld, glue)."}
+          - {name: B, criteria: "Start one unit of product B (pick, insert, fasten, screw, weld). Fasten needs both S3 arms."}
+          - {name: C, criteria: "Start one unit of product C (pick, weld, glue, insert, fasten, screw). Fasten needs both S3 arms; C is the longest recipe."}
+        llm: when_unsure
+  disruption:                                        # §3.2, subject: the arm
+    state_keys: [event, arm, alternatives, line, orders]
+    llm:
+      use: when_unsure
+      system: "You are the line supervisor {agent} of a five-arm assembly line. An arm is in trouble. Choose how the line rides it out: throughput and on-time delivery matter, and so does not piling up pallets that cannot move."
+    questions:
+      response:
+        type: choice
+        instructions: "How should the line respond to this arm's trouble?"
+        classes:
+          - {name: wait_recover, criteria: "Keep routes as they are; the arm should be back soon or its work has no alternative."}
+          - {name: reroute, criteria: "Send this arm's work to other capable arms until it recovers; worth it when alternatives exist and recovery is slow, even if some parts need a lap."}
+          - {name: slow_line, criteria: "Release fewer parts until the arm recovers, so pallets do not pile up behind it; for long outages with no alternative."}
+          - {name: pause_station, criteria: "Take the arm out of service for a while, route around it and change its tool afterwards; for an arm that keeps faulting or whose sensors cannot be trusted."}
+        llm: when_unsure
+  quality_watch:                                     # §3.3, subject: the arm
+    state_keys: [arm, qa_record, tool, line]
+    llm:
+      use: when_unsure
+      system: "You are the quality watch of {agent}, the supervisor of a five-arm assembly line. QA just flagged an operation done by this arm. Decide whether the arm needs attention; tool changes cost capacity, escaped defects cost far more."
+    questions:
+      escalate:
+        type: choice
+        instructions: "QA flagged this arm's work. What should the supervisor do about the arm?"
+        classes:
+          - {name: monitor, criteria: "A one-off or noise; keep watching."}
+          - {name: inspect_tool, criteria: "Ask the arm to check its tool before its next operation; a pattern is forming but the evidence is mixed."}
+          - {name: order_tool_change, criteria: "Order a tool change now; repeated flags and a worn tool."}
+        llm: when_unsure
+policy:
+  preset: balanced
+  T_dwell: 0.01          # per-item decisions: the last item's switch must not pin the next one
+  T_refresh: 3600.0      # event-driven sets: no periodic re-asks
+  llm_timeout: 10.0      # wall s (Sonnet)
+  T_wait: 40.5           # sim s: llm_timeout x scenario real_time_factor (4) + 0.5

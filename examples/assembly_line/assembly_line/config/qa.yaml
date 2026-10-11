@@ -1,0 +1,27 @@
+# QA agent catalog (DECISION_MODEL §5). Asked only for parts with a reading below ok_min; clean
+# parts pass by rule. Scrap is irreversible: Jev and the LLM must both pick it (two keys).
+catalog_version: 1
+name: line_qa
+question_sets:
+  inspect:                                           # §5.2, subject: part<N>
+    state_keys: [part, readings, arm_records, line]
+    llm:
+      use: when_unsure
+      system: "You are the QA reasoning module of {agent} at the end of an assembly line. Each reading estimates one operation's quality (1.0 perfect; below about 0.75 the part is defective) with sensor noise. Shipping a defective part is by far the worst outcome; scrapping a good one wastes it."
+    questions:
+      disposition:
+        type: choice
+        act: argmax          # no fleet coordination to gain from sampling
+        instructions: "What should happen to this part?"
+        classes:
+          - {name: pass, criteria: "Ship it; the flagged readings are most likely sensor noise on a good part."}
+          - {name: rework, criteria: "Send it back to redo the operation with the worst reading; the defect is likely and fixable."}
+          - {name: quarantine, criteria: "Pull it for a human to inspect; the evidence is ambiguous or reworks are exhausted."}
+          - {name: scrap, criteria: "Destroy it; clearly defective and not worth reworking.", reversible: false}
+        fallback: quarantine # a timed-out or failed decision must never ship a suspect part
+        llm: when_unsure
+policy:
+  preset: careful        # stickier, more LLM budget, llm_timeout 10
+  T_dwell: 0.01          # per-item decisions: the last item's switch must not pin the next one
+  T_refresh: 3600.0      # event-driven: no periodic re-asks
+  T_wait: 40.5           # sim s: llm_timeout (10) x scenario real_time_factor (4) + 0.5

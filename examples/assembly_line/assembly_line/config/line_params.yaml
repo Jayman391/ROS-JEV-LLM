@@ -1,0 +1,42 @@
+# Assembly line overrides of the jev_ai servers (DECISION_MODEL §2). Keys never go here.
+jev_server:                        # shared by every agent
+  ros__parameters:
+    max_rps: 40.0
+    mock:
+      seed: 7
+      first_bias: 0.05
+      latency_s: 0.03
+      rules: assembly_line.mock_rules:line
+
+llm_server:                        # arms + QA: Haiku 5.5, effort low
+  ros__parameters:
+    model: claude-haiku-5-5
+    effort: low
+    timeout_s: 10.0
+    max_tokens: 1024               # one decisive question + rationale per set
+    max_rps: 10.0
+    mock:
+      seed: 7
+      disagreement: 0.3
+      latency_s: 0.6
+
+/line_supervisor/llm_server:       # supervisor: Sonnet 5.5, effort medium
+  ros__parameters:
+    model: claude-sonnet-5-5
+    effort: medium
+    timeout_s: 15.0
+    max_tokens: 1024
+    mock:
+      seed: 11
+      disagreement: 0.25
+      latency_s: 1.5
+
+decision_logger:
+  ros__parameters:
+    path: /tmp/assembly_line/decisions.jsonl
+
+dashboard:
+  ros__parameters:
+    allowed_hosts: localhost,127.0.0.1,::1
+    max_records: 8000
+    summary: line_scorer,line_supervisor,line_sim      # pinned to the page's summary bar

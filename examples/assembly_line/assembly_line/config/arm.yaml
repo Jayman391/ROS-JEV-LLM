@@ -1,0 +1,42 @@
+# Arm agent catalog (DECISION_MODEL §4). Status-quo class first. Asked only off the routine path:
+# a pre-op reading that is not nominal (op_check) or a late fasten partner (coop).
+catalog_version: 1
+name: line_arm
+question_sets:
+  op_check:                                          # §4.2, subject: part<N>:op<k>
+    state_keys: [operation, grip, alignment, tool, sensors, context]
+    group: arms
+    llm:
+      use: when_unsure
+      system: "You are the onboard reasoning module of {agent}, one robot arm on an assembly line. A pre-operation check found something off. A defective part costs far more than a few seconds, but every delay backs up the line."
+    questions:
+      action:
+        type: choice
+        instructions: "Not every pre-operation reading is nominal. What should the arm do before this operation?"
+        classes:
+          - {name: proceed, criteria: "Run the operation as is; the anomaly is minor and should still give a good part."}
+          - {name: retry, criteria: "Regrip and re-measure (3 s); a marginal grip or a misalignment that a regrip may fix."}
+          - {name: tool_change, criteria: "Change the tool first (25 s); the tool is worn, or an inspection request points at the tool."}
+          - {name: hand_off, criteria: "Let another capable arm do this operation; this arm cannot do it well right now."}
+        llm: when_unsure
+  coop:                                              # §4.3, fasten partner late
+    state_keys: [step, partner, waiting, queue]
+    group: arms
+    tick_hz: 0.5         # while waiting: re-asked only when the words change (ask_jev: change)
+    llm:
+      use: when_unsure
+      system: "You are the onboard reasoning module of {agent}, one robot arm on an assembly line. You are waiting for your partner arm to do a two-arm fasten step together."
+    questions:
+      coop_action:
+        type: choice
+        instructions: "The partner arm is late for the two-arm fasten step. Keep waiting, or abort the step so the pallet moves on and comes back after a lap?"
+        classes:
+          - {name: wait, criteria: "Keep waiting; the partner should be ready soon."}
+          - {name: abort_step, criteria: "Give up on the step for now; the partner is unlikely to be ready soon and the line is backing up."}
+        llm: when_unsure
+policy:
+  preset: fast           # tau 0.3, kappa 0.4, k_max 3, ask_jev: change
+  T_dwell: 0.01          # per-item decisions: the last item's switch must not pin the next one
+  T_refresh: 3600.0      # event-driven: no periodic re-asks
+  llm_timeout: 6.0       # wall s (Haiku)
+  T_wait: 24.5           # sim s: llm_timeout x scenario real_time_factor (4) + 0.5
