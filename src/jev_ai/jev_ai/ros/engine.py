@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import threading
 import time
 import uuid
@@ -35,6 +36,7 @@ from jev_ai.core.records import record_dict
 
 TICK_S = 0.1      # ponytail: one 10 Hz engine timer drives ticks, deadlines and T_wait polling;
 #                   tick_hz above 10 needs its own timer.
+NUMBER = re.compile(r'\d+(?:\.\d+)?')
 
 
 @dataclass
@@ -69,6 +71,7 @@ class _Set:
         self.schema = json.dumps(response_schema(qset))
         self.system = ''
         self.state: list[tuple[str, str]] = []   # last encoded state, catalog order
+        self.sig: list[tuple[str, str]] = []     # ... with its numbers masked (ask_jev: change)
         self.next_tick = 0.0
         self.last_refresh = None
         self.triggers: list[str] = []
@@ -101,6 +104,9 @@ class DecisionEngine:
                  autonomous: bool = True, all_phases: bool = False,
                  on_idle: Callable[[str], None] | None = None):
         self.node = node
+        if isinstance(catalog, Catalog) and policy:
+            raise ValueError('policy overrides need a catalog path or dict; a Catalog object '
+                             'is already loaded (use load_catalog(src, policy))')
         self.cat = catalog if isinstance(catalog, Catalog) else load_catalog(catalog, policy)
         self.encode, self.mask, self.require = encode_state, mask, require
         self.current_cb = current
@@ -206,19 +212,25 @@ class DecisionEngine:
                     s.triggers.append('periodic')
                 if s.qset.tick_hz > 0 and now >= s.next_tick or s.triggers:
                     s.next_tick = now + (1.0 / s.qset.tick_hz if s.qset.tick_hz > 0 else 0.0)
-                    self._ask_jev(s)
+                    self._ask_jev(s, if_changed=not s.triggers and pol.ask_jev == 'change')
 
     def _targets(self, qset):
         return [self.sets[qset]] if qset else list(self.sets.values())
 
-    def _ask_jev(self, s: _Set) -> None:
+    def _ask_jev(self, s: _Set, if_changed: bool = False) -> None:
+        """``if_changed`` (policy ask_jev: change): skip the call while the encoded state reads
+        the same once its numbers are ignored."""
         if s.jev_sent is not None:
             return                                               # coalesce while in flight
         try:
-            s.state = s.qset.ordered_state(self.encode(s.qset.name))
+            state = s.qset.ordered_state(self.encode(s.qset.name))
         except Exception as e:                                   # noqa: BLE001 - app callback
             self.log.error(f'{s.qset.name}: encode_state failed: {e}')
             return
+        sig = [(k, NUMBER.sub('#', v)) for k, v in state]
+        if if_changed and sig == s.sig:
+            return
+        s.state, s.sig = state, sig
         if not self.jev.service_is_ready():
             self._on_jev(s, None, {'error': 'jev/decide unavailable'})
             return
@@ -290,7 +302,9 @@ class DecisionEngine:
             return self._apply(s, s.m.on_llm_failed(now, step.generation))
         goal = Reason.Goal(system=s.system, response_schema=s.schema, context=context(
             s.qset, s.state, p, masked=masked, current=s.m.current, history=list(s.history),
-            seed=f'{self.run_id}:{self.agent}:{step.decision_id}'))
+            seed=f'{self.run_id}:{self.agent}:{step.decision_id}'),
+            # the server's own timeout_s caps this, so one knob (llm_timeout) sets the deadline
+            options=[KeyValue(key='timeout_s', value=f'{pol.llm_timeout:g}')])
         self._send_goal(s, goal, step.generation, attempt=0)
 
     def _send_goal(self, s: _Set, goal, generation: int, attempt: int) -> None:

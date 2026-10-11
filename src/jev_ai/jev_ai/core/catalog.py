@@ -25,6 +25,16 @@ DEFAULT_ACT = {NOUL: 'threshold', CHOICE: 'sample', SCORE: 'sample'}
 # beta_min..eta come from `ros2 jev calibrate`, which fits them per question (§12).
 # skip_llm_above_c per question: only the questions that set it gate augmentation (§5.2 step 6).
 QUESTION_OVERRIDES = {'tau', 'kappa', 'coupling', 'coupling_directive', 'argmax_margin', 'beta_min', 'beta_max', 'gamma', 'B', 'eta', 'skip_llm_above_c'}
+# The LLM dial (TUNING.md): a set's `llm.use` and a question's `llm`.
+LLM_USE = {'never', 'when_unsure', 'always'}
+# `policy: {preset: ...}`: a coherent starting point; any key next to it overrides (TUNING.md).
+PRESETS = {
+    'balanced': {},                                   # the defaults below
+    # fast: few LLM calls, quick switches, Jev only when the state changes
+    'fast': {'tau': 0.3, 'kappa': 0.4, 'T_dwell': 2.0, 'k_max': 3.0, 'ask_jev': 'change'},
+    # careful: more LLM budget and patience, stickier choices
+    'careful': {'tau': 0.3, 'kappa': 1.0, 'T_dwell': 8.0, 'k_max': 12.0, 'llm_timeout': 10.0},
+}
 
 
 class CatalogError(ValueError):
@@ -55,8 +65,11 @@ class Policy:
     skip_llm_above_c: float | None = None  # None = always augment
     reuse_stale_llm: bool = False
     jev_timeout: float = 1.0
-    llm_timeout: float = 6.0
+    llm_timeout: float = 6.0             # wall s; sent to llm_server as the call's deadline
     N_fail: int = 3
+    # 'tick': ask Jev every 1/tick_hz. 'change': on a tick, ask only if the encoded state changed
+    # ignoring its numbers (a bucket word, task or order changed); triggers, T_refresh still ask.
+    ask_jev: str = 'tick'
 
     def __post_init__(self):
         if self.T_wait is None:
@@ -80,6 +93,8 @@ class Policy:
                      'llm_timeout', 'N_fail'):
             if getattr(self, name) <= 0:
                 raise CatalogError(f'policy.{name} must be > 0')
+        if self.ask_jev not in ('tick', 'change'):
+            raise CatalogError(f'policy.ask_jev={self.ask_jev!r} must be tick or change')
         if self.T_wait < self.llm_timeout + 0.5:
             # §11: an LLM timeout must resolve before T_wait, so the timeout path is FALLBACK.
             raise CatalogError(
@@ -88,10 +103,13 @@ class Policy:
     @classmethod
     def from_dict(cls, d: dict | None) -> Policy:
         d = dict(d or {})
+        preset = d.pop('preset', 'balanced')
+        if preset not in PRESETS:
+            raise CatalogError(f'policy.preset={preset!r} must be one of {sorted(PRESETS)}')
         unknown = set(d) - {f.name for f in dataclasses.fields(cls)}
         if unknown:
             raise CatalogError(f'unknown policy keys: {sorted(unknown)}')
-        return cls(**d)
+        return cls(**{**PRESETS[preset], **d})
 
     def merged(self, overrides: dict) -> Policy:
         return dataclasses.replace(self, **overrides) if overrides else self
@@ -195,7 +213,20 @@ def _question_set(name: str, body: dict, policy: Policy) -> QuestionSet:
     if not isinstance(qs, dict) or not qs:
         raise CatalogError(f'{where}.questions must be a non-empty mapping')
     questions = {qn: _question(f'{where}.questions.{qn}', qn, qb, policy) for qn, qb in qs.items()}
-    augment = bool(body.get('augment', True))
+    llm = body.get('llm') or {}
+    _keys(llm, f'{where}.llm', required=set(), optional={'system', 'use'})
+    use = llm.get('use')
+    if use is not None and use not in LLM_USE:
+        raise CatalogError(f'{where}.llm.use={use!r} must be one of {sorted(LLM_USE)}')
+    if use == 'never' and body.get('augment') is True:
+        raise CatalogError(f'{where}: llm.use never contradicts augment: true')
+    if use in ('when_unsure', 'always'):
+        # the set's default for questions that don't pick their own (`llm:` / skip_llm_above_c)
+        gate = policy.c_low if use == 'when_unsure' else None
+        questions = {qn: q if 'llm' in qs[qn] or 'skip_llm_above_c' in qs[qn] else
+                     dataclasses.replace(q, policy=q.policy.merged({'skip_llm_above_c': gate}))
+                     for qn, q in questions.items()}
+    augment = bool(body.get('augment', use != 'never'))
     if not augment and any(q.irreversible(True) for q in questions.values()):
         raise CatalogError(f'{where}: irreversible classes need augment: true '
                            '(use require() for deterministic overrides)')
@@ -213,12 +244,12 @@ def _question_set(name: str, body: dict, policy: Policy) -> QuestionSet:
         llm_params[pn] = (lo, hi, d)
     return QuestionSet(name=name, state_keys=tuple(keys), questions=questions, policy=policy,
                        tick_hz=tick_hz, augment=augment, group=body.get('group'),
-                       llm_params=llm_params, llm_system=(body.get('llm') or {}).get('system', ''))
+                       llm_params=llm_params, llm_system=llm.get('system', ''))
 
 
 def _question(where: str, name: str, body: dict, policy: Policy) -> QuestionSpec:
     _keys(body, where, required={'type', 'instructions'},
-          optional={'act', 'classes', 'criteria', 'fallback', 'threshold', 'bias'}
+          optional={'act', 'classes', 'criteria', 'fallback', 'threshold', 'bias', 'llm'}
           | QUESTION_OVERRIDES)
     qtype = TYPES.get(body['type'])
     if qtype is None:
@@ -260,8 +291,19 @@ def _question(where: str, name: str, body: dict, policy: Policy) -> QuestionSpec
     threshold = float(body.get('threshold', 0.5))
     if not 0.0 <= threshold <= 1.0:
         raise CatalogError(f'{where}.threshold must be in [0, 1]')
+    overrides = {k: body[k] for k in QUESTION_OVERRIDES if k in body}
+    use = body.get('llm')
+    if use is not None:
+        # one LLM call answers the whole set, so a question can't opt out of it: it only gates
+        if use not in ('when_unsure', 'always'):
+            raise CatalogError(f'{where}.llm={use!r} must be when_unsure or always '
+                               '(llm.use: never is per set)')
+        if use == 'always':
+            overrides['skip_llm_above_c'] = None
+        else:
+            overrides.setdefault('skip_llm_above_c', policy.c_low)
     try:
-        qpolicy = policy.merged({k: body[k] for k in QUESTION_OVERRIDES if k in body})
+        qpolicy = policy.merged(overrides)
     except CatalogError as e:
         raise CatalogError(f'{where}: {e}') from None
     bias = body.get('bias') or {}

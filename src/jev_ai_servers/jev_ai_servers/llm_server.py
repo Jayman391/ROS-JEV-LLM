@@ -80,6 +80,11 @@ class LlmServer(BackendServer):
         defaults = {'effort': self.p('effort'), 'max_tokens': str(self.p('max_tokens'))}
         options = {k: v for k, v in defaults.items() if v != ''}
         options.update({kv.key: kv.value for kv in goal.options})
+        # A goal's timeout_s (the engine's llm_timeout) may shorten the server's, not extend it.
+        try:
+            timeout_s = min(float(options.pop('timeout_s', 'inf')), self.p('timeout_s'))
+        except ValueError:
+            timeout_s = self.p('timeout_s')
         # The server's max_tokens is a ceiling a goal may lower but not raise (cost per call).
         try:
             asked = int(options.get('max_tokens', self.p('max_tokens')))
@@ -104,7 +109,7 @@ class LlmServer(BackendServer):
 
         feedback('queued', '')
         r, error, ms = self.call(
-            run, cancelled=lambda: goal_handle.is_cancel_requested,
+            run, timeout_s=timeout_s, cancelled=lambda: goal_handle.is_cancel_requested,
             account=lambda r: (r.input_tokens + r.output_tokens, r.cost_usd))
         res = Reason.Result(success=False, error=error, latency_ms=ms)
         if error == 'cancelled':

@@ -27,7 +27,8 @@ P = {'next_action': [0.5, 0.45, 0.05], 'urgency': [0.6, 0.3, 0.1], 'report_now':
 class World:
     """Fake jev_server + llm_server, the engine's node, and a record collector."""
 
-    def __init__(self, llm=True, jev=True, llm_weights=None, mask=None, catalog=None):
+    def __init__(self, llm=True, jev=True, llm_weights=None, mask=None, catalog=None,
+                 encode=None):
         rclpy.init()
         self.server = rclpy.create_node('fake_servers')
         self.agent = rclpy.create_node('agent')
@@ -38,10 +39,11 @@ class World:
             self.server.create_service(JevDecide, 'jev/decide', self._jev)
         if llm:
             self.action = ActionServer(self.server, Reason, 'llm/reason', self._llm)
-        self.records, self.decisions = [], []
+        self.records, self.decisions, self.jev_calls, self.goals = [], [], 0, []
         self.agent.create_subscription(DecisionRecord, 'decisions', self.records.append, 100)
         self.engine = DecisionEngine(
-            self.agent, catalog or copy.deepcopy(PATROL), encode_state=lambda _: dict(STATE),
+            self.agent, catalog or copy.deepcopy(PATROL),
+            encode_state=encode or (lambda _: dict(STATE)),
             mask=lambda _: mask or {}, on_decision=self.decisions.append, run_id='test')
         self.ex = MultiThreadedExecutor(num_threads=4)
         self.ex.add_node(self.server)
@@ -50,6 +52,7 @@ class World:
         self.thread.start()
 
     def _jev(self, req, res):
+        self.jev_calls += 1
         res.success, res.model = True, 'fake-jev'
         for q in req.questions:
             p = self.p[q.name]
@@ -59,6 +62,7 @@ class World:
         return res
 
     def _llm(self, goal_handle):
+        self.goals.append(goal_handle.request)
         goal_handle.succeed()
         weights = dict(self.llm_weights)
         return Reason.Result(success=True, model='fake-llm', json=json.dumps(
@@ -101,6 +105,32 @@ def test_act_then_revise(world):
         {'inspect_altitude_m': 15.0}                                     # clamped (§7)
     assert world.decisions[0].phase == 'PROVISIONAL'                    # acted immediately
     assert final.run_id == 'test' and final.catalog_hash
+    opts = {kv.key: kv.value for kv in world.goals[0].options}
+    assert opts == {'timeout_s': '6'}                   # llm_timeout is the call's deadline
+
+
+def _change_world(clock):
+    cat = copy.deepcopy(PATROL)
+    cat['policy'] = {**(cat.get('policy') or {}), 'ask_jev': 'change', 'T_refresh': 60.0}
+    cat['question_sets']['next_step']['tick_hz'] = 10.0
+
+    def encode(_):              # the number moves every tick; the words only with clock['phase']
+        clock['n'] += 1
+        return {**STATE, 'energy': f'{clock["n"]}% left, {clock["phase"]}'}
+    return World(catalog=cat, encode=encode)
+
+
+def test_ask_jev_change_skips_unchanged_state():
+    clock = {'n': 0, 'phase': 'ample'}
+    w = _change_world(clock)
+    try:
+        assert w.wait(lambda: w.jev_calls >= 1)
+        time.sleep(1.0)                                     # ~10 ticks, numbers changing
+        assert w.jev_calls == 1
+        clock['phase'] = 'tight'
+        assert w.wait(lambda: w.jev_calls == 2)
+    finally:
+        w.close()
 
 
 @pytest.mark.parametrize('world', [{'llm': False}], indirect=True)

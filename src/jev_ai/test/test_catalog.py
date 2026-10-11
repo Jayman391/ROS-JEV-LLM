@@ -63,11 +63,33 @@ def _q(raw, name='next_action'):
     (lambda r: r.update(policy={'beta_max': 9}), 'beta_max'),
     (lambda r: r.update(policy={'bogus': 1}), 'unknown policy'),
     (lambda r: r.update(catalog_version=2), 'catalog_version'),
+    (lambda r: r.update(policy={'preset': 'turbo'}), 'preset'),
+    (lambda r: r.update(policy={'ask_jev': 'sometimes'}), 'ask_jev'),
+    (lambda r: r['question_sets']['next_step'].update(llm={'use': 'maybe'}), 'llm.use'),
+    (lambda r: r['question_sets']['next_step'].update(llm={'use': 'never'}), 'augment: true'),
+    (lambda r: _q(r).update(llm='never'), 'per set'),
 ])
 def test_validation_rejects(raw, mutate, match):
     mutate(raw)
     with pytest.raises(CatalogError, match=match):
         load_catalog(raw)
+
+
+def test_presets_and_llm_dial(raw):
+    fast = load_catalog({**raw, 'policy': {'preset': 'fast', 'kappa': 0.5}}).policy
+    assert (fast.tau, fast.kappa, fast.ask_jev) == (0.3, 0.5, 'change')    # a key overrides
+    assert load_catalog({**raw, 'policy': {'preset': 'balanced'}}).policy == Policy()
+    gate = lambda c, q: c.question_sets['next_step'].questions[q].policy.skip_llm_above_c  # noqa
+    s = raw['question_sets']['next_step']
+    s['llm'] = {'use': 'when_unsure'}
+    _q(raw, 'urgency')['llm'] = 'always'
+    _q(raw, 'report_now')['skip_llm_above_c'] = 0.9
+    c = load_catalog(raw)
+    assert (gate(c, 'next_action'), gate(c, 'urgency'), gate(c, 'report_now')) == (0.5, None, 0.9)
+    s['llm'] = {'use': 'always'}
+    _q(raw, 'next_action')['llm'] = 'when_unsure'
+    c = load_catalog(raw)
+    assert (gate(c, 'next_action'), gate(c, 'urgency'), gate(c, 'report_now')) == (0.5, None, 0.9)
 
 
 def test_policy_defaults_match_spec():
