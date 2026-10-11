@@ -1,0 +1,7 @@
+# Put a new part on the feeder. Refused while the feeder slot is taken.
+string product
+string[] route            # arm per recipe op ("arm_d+arm_c" for fasten); '' = unroutable
+---
+bool success
+string message
+int32 part_id

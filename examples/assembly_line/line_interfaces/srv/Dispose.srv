@@ -1,0 +1,7 @@
+# QA's verdict on the part in the QA slot.
+int32 part_id
+string disposition        # pass | rework | quarantine | scrap
+int32 rework_op           # rework: the recipe op to redo
+---
+bool success
+string message

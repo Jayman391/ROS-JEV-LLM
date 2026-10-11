@@ -1,0 +1,7 @@
+# Re-plan a part's remaining ops (reroute, hand-off, rework redo).
+int32 part_id
+int32 from_op             # route[from_op:] is replaced; ops already done stay
+string[] route
+---
+bool success
+string message

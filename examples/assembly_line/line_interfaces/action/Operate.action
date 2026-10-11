@@ -1,0 +1,15 @@
+# An arm operation (SYSTEM_MODEL §6). kind:
+#   op          do the op pending for this arm (fasten: both arms send one; the first waits)
+#   regrip      3 s; redraw grip and pose of the pending op
+#   tool_change wear -> 0
+#   defer       leave the pending op undone; the pallet moves on and comes back after a lap
+# Cancelling an op goal that is waiting for its partner releases the handshake.
+string kind
+int32 part_id
+int32 op_index
+---
+bool success
+string message            # done | jam | partner jammed | cancelled | rejected: <why>
+---
+string state
+float64 progress
