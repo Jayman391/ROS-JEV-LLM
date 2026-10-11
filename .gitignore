@@ -12,6 +12,7 @@ wheels/
 # API keys (passed to containers with docker --env-file; never commit)
 .env
 .env.*
+!.env.example
 .claude/worktrees/
 
 # colcon

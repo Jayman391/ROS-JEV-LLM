@@ -3,7 +3,7 @@
 **jev_ai** adds calibrated, LLM-augmented decision making to *existing* ROS 2 nodes:
 
 - **System 1:** a fast typed decision model, **Jev** (TypeSafe, or local via llama_ros), runs as a ROS **service**. Each decision is declared as a typed question: choice, score, or yes/no.
-- **System 2:** an **LLM** (Claude natively, or any OpenAI-compatible model) runs as a ROS **action**. It always *augments* the Jev answer, with bounded influence.
+- **System 2:** an **LLM** (Claude natively, or any OpenAI-compatible model) runs as a ROS **action**. It *augments* the Jev answer with bounded influence, when the catalog's LLM dial asks for it ([TUNING.md](TUNING.md)).
 - **Fusion:** jev_ai fuses the two answers, applies the app's safety masks, samples with coupled noise, and commits the decision under an act-then-revise protocol.
 - **Records:** every decision is recorded for calibration and off-policy evaluation.
 
@@ -17,7 +17,9 @@
 
 ---
 
-## 0. Quickstart (the target user experience)
+## 0. At a glance
+
+The runnable quickstart (dev container, keyless) is in the [README](../README.md); [GUIDE.md](GUIDE.md) builds an agent and [TUNING.md](TUNING.md) covers every knob. On a native ROS 2 install:
 
 ```bash
 rosdep install --from-paths src -y && pip install -r src/jev_ai/requirements.txt
@@ -65,10 +67,10 @@ Mock mode needs no keys, but **only when you ask for it**: `backend:=mock`. A li
 | **Mask / require** | App callbacks. `mask` lists classes that are forbidden now; `require` forces a class deterministically, bypassing both models. Both are absolute. |
 | **Fusion policy** | Combines the Jev distribution with the LLM preference: confidence-weighted, bounded log-linear pooling plus calibrated biases (§6). |
 | **Coupled sampling** | Gumbel-max with noise shared within a **group**. The per-question **coupling ρ** sets how often an agent uses the group noise instead of its own. |
-| **Commitment** | `PROVISIONAL` → (`REVISED` \| `KEPT`) → `COMMITTED`, plus `FALLBACK` and `FORCED`. Irreversible classes need augmentation and a margin. |
+| **Commitment** | `PROVISIONAL` → (`REVISED` \| `KEPT`) → `COMMITTED`, plus `FALLBACK` and `FORCED`. Irreversible classes need two keys: Jev's and the LLM's top class (§6.4). |
 | **Engine** | `DecisionEngine`: the single implementation of §5–§7. It runs in-process (Python) or hosted by `decide_server` for remote clients (C++, BT, other languages). |
 | **Backend** | A named plugin behind a server. Jev: `typesafe`, `llama_ros`, `mock`, `replay`. LLM: `anthropic`, `openai_compat`, `mock`, `replay`. |
-| **Report / Directive** | The optional hierarchy module (`jev_ai.hierarchy`): workers report upward and supervisors direct downward. |
+| **Report / Directive** | The optional hierarchy module (`jev_ai.ros.hierarchy`, exported as `jev_ai.Hierarchy`): workers report upward and supervisors direct downward. |
 | **DecisionRecord** | The full trace of one decision. It includes the noise and propensities that off-policy evaluation needs. |
 
 ## 2. Architecture and packages
@@ -90,9 +92,9 @@ Mock mode needs no keys, but **only when you ask for it**: `backend:=mock`. A li
 | `jev_ai_servers` | ament_python | lifecycle nodes `jev_server`, `llm_server`, `decide_server`, `decision_logger`; `dashboard`; built-in backends; declared parameters, read-only after launch |
 | `jev_ai_cpp` | ament_cmake | `jev_ai::DecisionClient`, `JevClient`, `ReasonClient` (async, deadlines), a component example (`toy_agent`) |
 | `jev_ai_bt` | ament_cmake | BehaviorTree.CPP v4 plugins: `JevAsk`, `Decide`, `Reason` on the `jev_ai_cpp` async clients (BehaviorTree.ROS2 isn't released for Humble) |
-| `ros2jev` | ament_python | ros2cli extension: `ros2 jev status \| ask \| calibrate \| replay \| ope \| search` |
+| `ros2jev` | ament_python | ros2cli extension: `ros2 jev status \| ask \| report \| calibrate \| replay \| ope \| search` |
 | `jev_ai_bringup` | ament_cmake | `bringup.launch.py`, default `params.yaml`, catalog template |
-| `jev_ai_examples` | ament_python | `toy_patrol` (Python agents and a supervisor; C++ and BT agents come from `jev_ai_cpp` / `jev_ai_bt`), `turtlesim` (visual), `toy_episode` (a `search` runner) |
+| `jev_ai_examples` | ament_python | `minimal` (the four callbacks), `toy_patrol` (Python agents and a supervisor; C++ and BT agents come from `jev_ai_cpp` / `jev_ai_bt`), `turtlesim` (visual), `toy_episode` (a `search` runner) |
 | `deploy/` (not a ROS package) | — | one Dockerfile (`ROS_DISTRO` build arg), compose, kustomize base + toy/turtlesim overlays. Optional, never required by the library |
 
 **One engine (D2).** There is exactly **one** decision-engine implementation, in Python.
@@ -274,7 +276,7 @@ question_sets:
   next_step:
     state_keys: [task, energy, link, hazards, detection]   # exact, ordered, validated
     tick_hz: 1.0                       # 0 = event-driven only
-    augment: true
+    augment: true                      # = llm.use not never
     group: fleet                       # coupling group (default: the agent itself)
     questions:
       next_action:
@@ -290,8 +292,8 @@ question_sets:
         kappa: 0.7                     # hysteresis / status-quo bonus (nats)
         coupling: 0.5                  # ρ (D3): 1.0 default when answering a directive
         argmax_margin: 0.1             # hysteresis on argmax_change triggers
-        # also per question: skip_llm_above_c, coupling_directive, and the calibrated beta_min, beta_max,
-        # gamma, B, eta and bias: {class: nats}  (written by `ros2 jev calibrate`, §12)
+        # also per question: llm (when_unsure | always), skip_llm_above_c, coupling_directive, and the
+        # calibrated beta_min, beta_max, gamma, B, eta and bias: {class: nats}  (`ros2 jev calibrate`, §12)
       urgency:
         type: score
         instructions: "How urgent is resolving the detection?"
@@ -306,8 +308,9 @@ question_sets:
     llm_params:
       inspect_altitude_m: {min: 8, max: 15, default: 10}
     llm:
+      use: when_unsure                 # never | when_unsure | always (unset: each question's own gate)
       system: "You are the onboard reasoning module of {agent}. …"
-policy: {}                             # overrides of §14
+policy: {preset: balanced}             # fast | balanced | careful, plus overrides of §14
 ```
 
 **Startup validation** (the engine refuses to start on any failure):
@@ -327,35 +330,37 @@ The catalog and policy hashes go into every record.
 ### 5.1 API
 
 ```python
-DecisionEngine(node, catalog,                     # any rclpy Node / LifecycleNode
+DecisionEngine(node, catalog,                     # any rclpy Node / LifecycleNode; path, dict or Catalog
                encode_state: Callable[[str], dict[str, str]],
                mask:    Callable[[str], dict[str, set[str]]] = None,
                require: Callable[[str], dict[str, str]] = None,
                on_decision: Callable[[Decision], None] = None,
+               on_degraded: Callable[[str], None] = None,
                jev="jev/decide", llm="llm/reason",  # relative names, remappable
-               group=None, run_id=None)
-engine.trigger(name, qset=None, priority="normal")  # app events
+               group=None, run_id=None, agent=None,
+               policy=None,                         # overrides; not with a loaded Catalog (raises)
+               current=None,                        # qset -> the app's own standing classes (per-item sets)
+               autonomous=True, all_phases=False, on_idle=None)
+engine.trigger(name, qset=None, priority="", *, fresh=False, subject="", directive=None)
 engine.completed(question)                          # current action finished → decision event
 engine.commit_point(question)                       # `until_commit` class becomes irreversible
 engine.set_subject(subject, qset=None)              # what the next decisions are about (records'
                                                     # `subject`; Labels join on it), e.g. from encode_state
+engine.current(qset)                                # the current selection
 ```
-
-- The `dashboard` renders every `/diagnostics` status: the servers' cards plus anything an app publishes (the drone swarm shows its score, mission state and one card per drone).
-- It also taps every `Directive` and `Report` topic it discovers (`viz/traffic.py`). The same message seen again on another agent's topic is a relay delivery (with its latency); an agent's relay endpoint that never sees it within 3 s is a drop. The **Comms** section shows this per supervisor ⇄ worker link: a swimlane timeline, delivered/dropped counts and a filterable message log. With one shared topic (no relay) messages show as "no relay seen".
 
 - `decide_server` hosts one engine per `agent` key. For those engines, the encoder, mask and require inputs come from the goal, and decisions go out as action feedback and result.
 
 ### 5.2 Decision cycle
 
-For each question set, on a tick or a trigger. Each set runs serially in its own MutuallyExclusive callback group (A4); service and action calls are async only (A5).
+For each question set, on a tick (with `ask_jev: change`, only when the encoded state's wording changed) or a trigger. Callbacks run in a reentrant group under one lock per engine, so a set's steps are serial (A4); service and action calls are async only (A5).
 
 1. **State:** `state = encode_state(qset)`, validated against `state_keys`.
 2. **Jev:** `JevDecide` (async, deadline `jev_timeout`, generation g) returns p_J per question. Per-question errors keep that question's current class.
 3. **Masks:** `mask()` and `require()` are evaluated *fresh*, now and again before every act (A4).
 4. **Fuse:** fuse with the cached LLM preference q_L (§6) if its `state_hash` and `mask_hash` match. Otherwise only the age-decayed q_L is used, and only when `reuse_stale_llm` is true (default false).
 5. **Select:** select per §6.3 and §6.4, then commit per §5.3, then call `on_decision`.
-6. **Augment:** if an augmentation trigger fired, the budget allows it and some gated question has `c < skip_llm_above_c` (default off: always augment), send an async `Reason` goal tagged `(decision_id, g, state_hash, mask_hash)`. Gated questions are those with a `skip_llm_above_c`: set it in `policy:` to gate on every question, or on single questions (e.g. only the acting one; yes/no and score questions are rarely confident, so a set-wide gate seldom skips). An irreversible pending choice always asks.
+6. **Augment:** if an augmentation trigger fired, the budget allows it and some gated question has `c < skip_llm_above_c` (default off: always augment), send an async `Reason` goal tagged `(decision_id, g, state_hash, mask_hash)`, with `llm_timeout` as its `timeout_s` option (the server clamps it to [1 s, its own `timeout_s`]). Gated questions are those with a `skip_llm_above_c`, set directly or through the LLM dial (a question's `llm: when_unsure`, a set's `llm.use`); yes/no and score questions are rarely confident, so gate the acting questions. `llm.use: never` (or `augment: false`) never asks. An irreversible pending choice always asks.
 7. **Revise:** when the LLM result arrives, discard it if g has advanced, or if the masks recomputed now differ from the tagged hash. Otherwise re-fuse with the **same noise** and run the commitment machine.
 8. **Record:** publish a `DecisionRecord` at every phase transition.
 
@@ -392,7 +397,7 @@ For each question set, on a tick or a trigger. Each set runs serially in its own
 - **Policy timers** (`T_dwell`, `T_wait`, `T_stale`, `T_refresh`, ticks, autonomous epochs) run on the **node clock**, so sim time works.
 - **API deadlines** run on **wall time**.
 - Records carry both clocks.
-- The validator warns when `use_sim_time` is set and the sim's real-time factor makes `T_wait` shorter in wall time than `llm_timeout`.
+- With `use_sim_time` faster than real time, `T_wait` (sim) must still cover `llm_timeout` (wall): set `T_wait = llm_timeout × real_time_factor + 0.5`. Nothing checks this for you.
 
 ## 6. Fusion and selection
 
@@ -490,10 +495,9 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 ## 8. Jev server (`jev_server`, lifecycle)
 
 - **Parameters** (declared; read-only after launch, since parameter services are open to the graph):
-  - `backend` (name)
-  - `<backend>.plugin`
-  - `<backend>.model` (pinned, e.g. `jev-1.13.0`)
-  - `<backend>.base_url` (TypeSafe or OpenRouter)
+  - `backend` (name; built-ins or a `jev_ai.jev_backends` entry point)
+  - `model` (pinned, e.g. `jev-1.13.0`; `typesafe.model` is the backend's own default)
+  - `typesafe.base_url` (TypeSafe or OpenRouter)
   - `timeout_s` 1.0
   - `max_retries` 1
   - budgets (§9)
@@ -548,14 +552,15 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 | Invariant | Mechanism |
 |---|---|
 | A masked class is never selected | z = −∞ after fusion; masks are recomputed before every act. Exception: `require()` beats `mask()` on the same class (flagged `require_overrides_mask`) |
-| Irreversible actions need System 2 input and a margin, or a deterministic `require` | §6.4, §5.3 |
+| Irreversible actions need Jev's and the LLM's top class (two keys), or a deterministic `require` | §6.4, §5.3 |
 | An LLM timeout never commits an irreversible class | the timeout path is FALLBACK, and the fallback must be reversible |
 | The fallback is always executable | validated as reversible; a fallback entry returned by `mask()` is ignored with an error log (apps use `require` for real overrides) |
 | The LLM's influence is bounded | \|δ\| ≤ B; one-sided on irreversible classes |
 | No unbounded LLM parameters reach the app | `llm_params` clamping |
 | Stale or racing results are never applied | generation, state hash and mask hash checks |
 | No silent mock | live backends fail at configure time without a key |
-| Spend is bounded | server rate/token budgets plus the circuit breaker (no USD cap in the prototype) |
+| Spend is bounded | server `max_rps`, the engine's `k_max`, and the circuit breaker (tokens and USD are reported, not capped, in the prototype) |
+| A client can't stretch or abuse a deadline | a goal's `timeout_s` is clamped to [1 s, server `timeout_s`]; NaN/inf ignored |
 
 | Failure | Behaviour |
 |---|---|
@@ -567,6 +572,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 ## 12. Records, calibration and evaluation (`ros2jev`)
 
 - **`decision_logger`:** subscribes to `decisions` and `labels` and writes JSONL (`<path>` and `<path stem>-labels.jsonl`); for rosbag2, `ros2 bag record /decisions /labels`. Prompts appear at DEBUG only.
+- **`dashboard`:** a live page over the same records (Decisions with filters, Metrics) plus every `/diagnostics` status: the servers' cards and anything an app publishes (3+ statuses with the same keys render as one table; the `summary` param pins statuses to the top bar). It also taps every `Directive` and `Report` topic it discovers (`viz/traffic.py`): the same message seen again on another agent's topic is a relay delivery (with its latency), and an agent's relay endpoint that never sees it within 3 s is a drop. The **Comms** section shows this per supervisor ⇄ worker link. `ros2 jev report` writes the same page offline.
 - **Labels** (`Label.msg`) join records on (run_id, subject or agent, decision_id, question). Apps publish them when they know the truth (`toy_patrol` publishes its world's oracle on every final decision).
 - **`ros2 jev calibrate`:** a convex **conditional-logit** fit per (question set, question) of exactly the §6.2 rule: z = log p_J (offset) + w1·ℓ·d + w2·(1−c)^γ·ℓ·d + b_q, with d = exp(−age/T_stale), so β_min = w1 and β_max = w1 + w2. Newton's method with a small ridge on b_q.
   - γ is chosen on a grid by the NLL of the **clamped** patch (γ trades off against β_min along a flat ridge), then B on a grid of the §14 range.
@@ -588,6 +594,8 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 ## 14. Parameters (defaults; catalog `policy:` and ROS params override)
 
+The full reference with every catalog, policy and server key is [TUNING.md](TUNING.md); this table lists the policy defaults. `preset: fast | balanced | careful` sets a group of them (balanced = this table).
+
 | Parameter | Default | Range | Tuned by |
 |---|---|---|---|
 | `beta_min`, `beta_max`, `gamma` | 0.1, **1.0**, **2.0** | [0, 0.5], [0.5, 3], [0.5, 3] | calibrate |
@@ -601,6 +609,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 | `k_max` (per engine), `c_low`, `skip_llm_above_c` | 6/min, 0.5, off | | search |
 | `reuse_stale_llm` | false | | |
 | `jev_timeout`, `llm_timeout`, `N_fail` | 1 s, 6 s, 3 | | |
+| `ask_jev` | tick | tick \| change | search |
 | server `max_rps` | 50 (llm 10) | | ops |
 
 ## 15. Non-goals (v1)

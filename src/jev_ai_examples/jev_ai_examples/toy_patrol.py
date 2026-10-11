@@ -6,7 +6,7 @@ smoke come and go, the link flickers. The app supplies what §5.1 asks of any ap
 - ``mask``: ``inspect`` is forbidden when there is nothing to inspect;
 - ``require``: ``halt_now`` is forced deterministically at ≤ 5 % battery (real emergencies
   never wait on an API, §6.4), while at < 15 % Jev itself starts proposing ``halt_now`` —
-  the irreversible path that needs LLM agreement and a margin;
+  the irreversible path that needs Jev and the LLM to both rank it first (two keys);
 - ``on_decision`` executes the selection; inspections pass a commit point after 1 s and
   complete after 4 s.
 A halted robot gets an "operator battery swap" after 8 s so the demo keeps cycling. The world

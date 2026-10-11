@@ -40,14 +40,14 @@ The framework is built and verified first. The drone swarm is built **at the ver
 
 ```
 src/jev_ai_msgs/          interfaces
-src/jev_ai/               jev_ai.core (pure) · jev_ai.ros (DecisionEngine, Agent, hierarchy, backend APIs)
-src/jev_ai_servers/       jev_server · llm_server · decide_server · decision_logger · built-in backends
+src/jev_ai/               jev_ai.core (pure) · jev_ai.ros (DecisionEngine, Hierarchy, run) · jev_ai.viz (dashboard)
+src/jev_ai_servers/       jev_server · llm_server · decide_server · decision_logger · dashboard · built-in backends
 src/jev_ai_cpp/           DecisionClient, JevClient, ReasonClient (async), component example
-src/jev_ai_bt/            BehaviorTree.CPP v4 plugins (+ vendored BehaviorTree.ROS2)
-src/ros2jev/              ros2 jev status | ask | calibrate | replay | ope | search
+src/jev_ai_bt/            BehaviorTree.CPP v4 plugins on the jev_ai_cpp clients
+src/ros2jev/              ros2 jev status | ask | report | calibrate | replay | ope | search
 src/jev_ai_bringup/       bringup.launch.py, params.yaml, catalog template
-src/jev_ai_examples/      toy_patrol (py, C++, BT, supervisor) · turtlesim
-deploy/                   Dockerfiles per distro, compose, kustomize (optional)
+src/jev_ai_examples/      minimal · toy_patrol (py, C++, BT, supervisor) · turtlesim
+deploy/                   one Dockerfile (ROS_DISTRO arg), compose, kustomize (optional)
 examples/drone_swarm/     Part B only
 docs/
 ```
@@ -60,12 +60,12 @@ docs/
 |---|---|---|---|
 | A1 | `jev_ai_msgs` + workspace + dev image stage | `ros2 interface show jev_ai_msgs/action/Decide` | interface review |
 | A2 | `jev_ai.core`: catalog and validator, fusion (§6.2), Gumbel coupled selection (§6.3), irreversible rule (§6.4), commitment machine, triggers, rate limiter, prompt and schema builder; **golden vectors** | `pytest src/jev_ai` (pure, no ROS) | **you write the revise/keep rule and the β schedule** |
-| A3 | `jev_server` (lifecycle, gen-param-lib, diagnostics, budgets) + backends `mock`, `replay`, `typesafe`, `llama_ros` | launch_test with mock; `ros2 service call jev/decide …`; live with `TYPESAFE_API_KEY` | mock realism |
+| A3 | `jev_server` (lifecycle, declared params, diagnostics, budgets) + backends `mock`, `replay`, `typesafe`, `llama_ros` | launch_test with mock; `ros2 service call jev/decide …`; live with `TYPESAFE_API_KEY` | mock realism |
 | A4 | `llm_server` + backends `mock`, `replay`, `anthropic`, `openai_compat` | launch_test with mock; `ros2 action send_goal llm/reason …`; live with `ANTHROPIC_API_KEY` | augmentation prompt |
 | A5 | `DecisionEngine` (in-process) + `decision_logger` + `jev_ai_bringup` + `ros2 jev status / ask` + `toy_patrol` Python agent + **live dashboard** (`dashboard` node, http://localhost:8080) | `ros2 launch jev_ai_examples toy_patrol.launch.py` → records stream and render live; kill `llm_server` → δ ≡ 0 fallback; restart → augmentation resumes | toy catalog |
-| A5.5 | **Metrics**: `jev_ai.core.metrics` over DecisionRecords (phase mix, revision/fallback rates, LLM agreement and influence, confidence, switch rate, propensities, latency, cost, coupling, calibration with labels) shown in the dashboard's Metrics tab and as a static report (`ros2 jev report`) | `ros2 jev report /tmp/jev_ai/toy_patrol.jsonl -o report.html`; numbers checked against hand-computed toy cases | which metrics matter |
+| A5.5 | **Metrics**: `jev_ai.core.metrics` over DecisionRecords (phase mix, revision/fallback rates, LLM agreement and influence, confidence, switch rate, propensities, latency, cost, coupling, calibration with labels) shown in the dashboard's Metrics section and as a static report (`ros2 jev report`) | `ros2 jev report /tmp/jev_ai/toy_patrol.jsonl -o report.html`; numbers checked against hand-computed toy cases | which metrics matter |
 | A6 | `decide_server` + `jev_ai_cpp` clients + C++ toy agent (component) | launch_test: the C++ agent's decisions are identical to the Python engine's on golden states | C++ API ergonomics |
-| A7 | `jev_ai.hierarchy`: reports and directives, supervisor pattern, directive-epoch coupling; toy supervisor + 3 workers | directive → workers' records share the noise key; expired and duplicate directives are dropped | supervisor questions |
+| A7 | `jev_ai.ros.hierarchy` (`jev_ai.Hierarchy`): reports and directives, supervisor pattern, directive-epoch coupling; toy supervisor + 3 workers | directive → workers' records share the noise key; expired and duplicate directives are dropped | supervisor questions |
 | A8 | `jev_ai_bt`: `JevAsk`, `Decide`, `Reason` BT.CPP v4 nodes + BT toy | a BT toy runs a decision loop using only XML | BT port design |
 | A9 | **turtlesim example** (Python engine, C++ client and BT variants) | visible: turtles patrol, avoid walls and react to injected "alerts" via jev_ai in noVNC | scenario |
 | A10 | `ros2 jev calibrate / replay / ope / search` | on toy runs: calibration patch, bias report, an OPE estimate checked against a re-run, a search table | metrics |
@@ -116,7 +116,7 @@ docs/
 | 2026-10-10 | A4 (paired): `openai_compat` needs no key for local endpoints: loopback, private IPs, and private hostnames (compose/k8s services, `*.local`) |
 | 2026-10-10 | A4 (paired): a model refusal or a `max_tokens` truncation gets its own error (not "invalid JSON"), and is not retried |
 | 2026-10-10 | A5 (paired): an `until_commit` class past `commit_point()` is **held** (path `committed`) until `completed()`; masks, `require`, and a *different* irreversible class winning §6.4 still override it |
-| 2026-10-10 | A5.5 added: metrics over DecisionRecords + dashboard Metrics tab + `ros2 jev report` |
+| 2026-10-10 | A5.5 added: metrics over DecisionRecords + dashboard Metrics tab (now a section, 2026-10-11) + `ros2 jev report` |
 | 2026-10-10 | Security review: server params are read-only after launch (the ROS param services are open to any peer); a goal's `max_tokens` cannot exceed the server's; dashboard binds 127.0.0.1 by default (compose: 0.0.0.0 behind a loopback port) and checks the Host header; record strings never reach `style=` unsanitized |
 | 2026-10-10 | A6: `decide_server` is a plain node (no backend or key to configure), one non-autonomous engine per goal `agent`. A goal with triggers or a directive is a decision event; a goal with neither is a **tick** (Jev asked, decide only if due, else the standing decision is the result), so C++ cadence matches `tick_hz`. A newer goal for the same (agent, set) preempts the older one (aborted). Remote `completed()` / `commit_point()` are the triggers `completed:<q>` / `commit_point:<q>` |
 | 2026-10-10 | A6: `jev_ai_cpp` is one header (`jev_ai/clients.hpp`): `DecisionClient` (request / start(hz) / trigger), `JevClient`, `ReasonClient` (deadline cancels the goal). No `visibility_control.h` (Linux only); the component example is `jev_ai_cpp::ToyAgent` (`toy_agent`) |
@@ -151,5 +151,6 @@ docs/
 | 2026-10-11 | (user, paired) **Hold for the LLM**: while an augmentation is open, Jev's argmax moving is not a decision event (masks, `require()`, app triggers and directives still are). Live at 2×: of 947 drone LLM requests only 75 answers were used; 391 decisions were superseded after a median 1.3 sim s (Haiku ≈ 7 sim s) and 538 were refused by the per-drone bucket, which the superseding decisions kept draining |
 | 2026-10-11 | (user, paired) **Relaunch**: in SEARCH the coordinator re-launches, once, a landed drone that is not recalled, has no fault and margin > 0.3 |
 | 2026-10-11 | (user, paired) **Dashboard, mission-first**: one page of native `<details>` sections (state kept across polls and reloads; closed ones aren't rendered): a sticky summary bar (statuses named by the dashboard's `summary` param, plus server health and spend), 3+ statuses with the same keys as one table (the drones; a row opens its decisions), each other app status (coordinator, scorer, comms, mission events, mission tracks) as a section, Decisions with agent / question set / outcome dropdowns, Servers, Metrics |
+| 2026-10-11 | (user, paired) **Streamline** ([PLAN-streamline.md](PLAN-streamline.md)): composable dials, back-compatible: policy `preset` (fast / balanced / careful), the LLM dial (`llm.use` per set, `llm` per question), `ask_jev: tick \| change` (Jev only when the state's wording changes), `llm_timeout` sent as the LLM call's deadline (server clamps it to [1 s, its timeout]); `policy=` with a loaded Catalog raises. Docs: README quickstart, GUIDE.md, TUNING.md, `minimal` example, `.env.example`; bringup defaults to mock; uv scaffold removed |
 | 2026-10-11 | (user) **Dashboard Comms section**: the dashboard discovers every `Directive`/`Report` topic and matches each message across topics (`viz/traffic.py`), so relayed traffic (the swarm's `comms_sim`) shows per link delivered / dropped / latency, a swimlane timeline and a filterable message log. Generic: no app code, no new message type. Mock run: counts equal `comms_sim`'s own (268 relayed, 2 dropped), latency p50 65–90 ms wall |
 | 2026-10-10 | (user) **`max_tokens_per_min` removed** from both servers: six drones exhausted 200k/min and silently fell back to Jev only. Tokens/min stays a reported metric; `max_rps` and the circuit breaker remain |

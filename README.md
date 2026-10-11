@@ -1,98 +1,102 @@
-# ROS-JEV
+# ROS-JEV: `jev_ai`, fast + deliberate decisions for ROS 2
 
-ROS 2 Humble + Gazebo Fortress, running in a Docker container on macOS (Apple Silicon).
+`jev_ai` gives a ROS 2 robot two ways to decide, and fuses them:
 
-Humble targets Ubuntu 22.04, and Humble's official Gazebo pairing is Fortress. macOS can't run either natively, so the whole stack runs in an Ubuntu 22.04 container under Docker Desktop.
+- **System 1: Jev** (TypeSafe's decision model), about 160 ms. It returns a probability for each option of each question, every time the robot asks.
+- **System 2: an LLM** (Claude), a few seconds. When Jev is unsure, or the stakes are high, the LLM reads the same situation and gives its own weights.
+- **Fusion.** The robot acts on Jev's pick at once, then revises if the LLM disagrees. Probabilities are pooled, weighted by Jev's confidence. Hard rules (masks, forced answers) always win. An irreversible action needs both systems to rank it first.
 
-GUI apps (the Gazebo GUI and `rviz2`) run on a virtual display inside the container and are viewed in your browser through noVNC. XQuartz isn't needed.
+You describe your decisions in a YAML **catalog**, and write four small callbacks:
 
-## Prerequisites
+- `encode` turns state into text;
+- `mask` lists forbidden options;
+- `require` gives forced answers;
+- `on_decision` acts.
 
-- **Docker Desktop** (Apple Silicon build). Start it and wait for the whale icon to settle.
+Everything else is configurable without code: when to ask the LLM, how sticky choices are, how much randomness to use, and how a fleet shares it.
 
-## Build
-
-From the repo root:
-
-```bash
-docker compose build
+```
+ state ──encode──► Jev (S1) ──p──► act now (PROVISIONAL)
+                       │ unsure?
+                       └─► LLM (S2) ──q──► fuse ──► keep or revise (KEPT / REVISED)
+ masks / require() ─────────────────────────┘   (hard rules always win)
 ```
 
-The first build downloads `ros-humble-desktop` and Gazebo Fortress, so it takes a while and needs roughly 10 GB of free disk.
-
-## Start the container
+## Quickstart (keyless, about 5 minutes after the image build)
 
 ```bash
-docker compose up -d                 # start the container in the background
-docker compose exec ros2 bash        # open a shell inside it
+docker compose build                      # once: ROS 2 Humble + Gazebo Fortress, ~10 GB
+docker compose up -d && docker compose exec ros2 bash
+# inside the container (the repo is at /ws/ROS-JEV):
+colcon build && source install/setup.bash
+ros2 launch jev_ai_examples toy_patrol.launch.py     # 3 robots, mock Jev + mock LLM
 ```
 
-The repo is mounted at `/ws/ROS-JEV` inside the container, so edits on the Mac show up there immediately. ROS is sourced in every `bash` shell. Stop it with `docker compose down`.
+Open **http://localhost:8080** for the dashboard, which shows:
 
-Open a separate `docker compose exec ros2 bash` shell for each process (Gazebo, the bridge, and ROS tools). They all share the same container, so they can see each other's topics.
+- **Decisions:** every decision and how it ended, with filters.
+- **Comms:** supervisor ⇄ worker messages.
+- **Metrics.**
 
-## Run Gazebo with the ROS connection
+The smallest agent you can copy is `src/jev_ai_examples/jev_ai_examples/minimal.py`, about 40 lines. To run it:
 
-**Gazebo server + GUI:**
 ```bash
-docker compose exec ros2 ign gazebo diff_drive.sdf
+ros2 launch jev_ai_bringup bringup.launch.py         # servers + dashboard
+ros2 run jev_ai_examples minimal                     # second shell
 ```
-Then run `docker compose exec ros2 gui-fullscreen` to fill the screen. Open **http://localhost:6080/vnc.html?resize=scale** in your browser and click **Connect**. `resize=scale` fits the virtual screen to your browser window. You'll be asked for a password, which is `password` by default (set as `VNC_PASSWORD` in the `Dockerfile`). To use a different one, change that value in the `Dockerfile` and rebuild, or set `VNC_PASSWORD` in the environment before `docker compose up -d`. The GUI window then appears after you connect. Use `-s -r` (`ign gazebo -s -r diff_drive.sdf`) for a headless server with no GUI.
 
-**ROS 2 bridge** (second shell):
+### Live models
+
 ```bash
-docker compose exec ros2 ros2 run ros_gz_bridge parameter_bridge \
-  '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock' \
-  '/model/vehicle_blue/odometry@nav_msgs/msg/Odometry[ignition.msgs.Odometry'
-```
-Each bridge argument is `ROS_topic@ROS_type[Gazebo_type`. The `[` means Gazebo → ROS, and `@` separates the ROS type from the Gazebo type. Quote the arguments in zsh, because `[` is a glob character.
-
-**Read ROS messages** (third shell):
-```bash
-docker compose exec ros2 ros2 topic list
-docker compose exec ros2 ros2 topic echo /clock --once
-docker compose exec ros2 ros2 topic echo /model/vehicle_blue/odometry --once
+cp .env.example .env            # then fill TYPESAFE_API_KEY and ANTHROPIC_API_KEY
+docker compose up -d            # recreates the container with the keys in its environment
+ros2 launch jev_ai_examples toy_patrol.launch.py jev_backend:=typesafe llm_backend:=anthropic
 ```
 
-**rviz2** (view in the same noVNC page):
-```bash
-docker compose exec ros2 rviz2
-```
+Keys are read from the environment only. Never put them in a catalog, in ROS parameters or in the repo.
 
-**Gazebo topics without ROS:**
-```bash
-docker compose exec ros2 ign topic -l
-```
+## Examples
 
-## Verify the install
+| Example | What it shows | Run |
+|---|---|---|
+| `minimal` | the 4 callbacks, nothing else | `ros2 run jev_ai_examples minimal` |
+| `toy_patrol` | a fleet with shared noise, a supervisor, reports and directives, labels for calibration | `ros2 launch jev_ai_examples toy_patrol.launch.py` |
+| `turtlesim` | the same agent in Python, C++ and a behavior tree | `ros2 launch jev_ai_examples turtlesim.launch.py` |
+| [`drone_swarm`](examples/drone_swarm/README.md) | search and rescue in Gazebo: 8 drones and a coordinator. Rules fly; Jev and Claude judge | `ros2 launch drone_swarm swarm.launch.py gui:=true` |
 
-**ROS 2 talker/listener:**
-```bash
-docker compose exec ros2 ros2 run demo_nodes_cpp talker &
-docker compose exec ros2 ros2 run demo_nodes_cpp listener
-```
-You should see `I heard: [Hello World: N]` lines.
+## Docs
 
-**OpenGL on the virtual display:**
-```bash
-docker compose exec ros2 glxinfo -B | grep renderer
-```
-Should print `llvmpipe` (software rendering).
+| Read | For |
+|---|---|
+| [docs/GUIDE.md](docs/GUIDE.md) | building an agent: the decision cycle, the catalog, the callbacks, hierarchies, C++ and behavior trees |
+| [docs/TUNING.md](docs/TUNING.md) | **tuning the System 1 / System 2 balance**: goal → dial, presets, and every knob with its default |
+| [docs/FRAMEWORK.md](docs/FRAMEWORK.md) | the specification (the math, guarantees, message types) |
+| [deploy/README.md](deploy/README.md) | one container per node: docker compose and Kubernetes |
+| [docs/DESIGN.md](docs/DESIGN.md) | roadmap and decision log |
 
-## Troubleshooting
+## Packages
 
-- **noVNC page is blank or won't connect:** Check the container is up (`docker compose ps`) and that the GUI process started. The virtual display is created when the container starts, so run `docker compose restart` if it's missing.
-- **noVNC says the password is wrong:** The password is `password` unless `VNC_PASSWORD` was changed. If you changed the `Dockerfile`, rebuild with `docker compose build` and restart with `docker compose up -d`.
-- **Gazebo window fills only part of the screen:** Run `docker compose exec ros2 gui-fullscreen` after the GUI starts. The container has no window manager, so there are no title bars to double-click.
-- **Mouse clicks do nothing in Gazebo:** Make sure you didn't add a window manager back. Clicks go straight to the app, so the window must be focused by clicking inside it.
-- **Gazebo GUI is slow:** Software rendering is slower than a GPU but works. Use `-s -r` for headless mode, or make the window smaller.
-- **Stale image after changing the Dockerfile:** `docker compose build --no-cache`.
-- **Port 6080 already in use:** Stop the other process using it, or change the left side of `"127.0.0.1:6080:6080"` in `docker-compose.yml`.
+| Package | |
+|---|---|
+| `jev_ai` | the engine (`DecisionEngine`, `Hierarchy`), the pure-Python core (catalog, fusion, commitment, metrics) and the dashboard page |
+| `jev_ai_servers` | `jev_server`, `llm_server`, `decide_server`, `decision_logger`, `dashboard`; the backends are mock, replay, typesafe, llama_ros, anthropic and openai_compat |
+| `jev_ai_msgs` | messages: `JevDecide`, `Reason`, `DecisionRecord`, `Directive`, `Report`, `Label` |
+| `jev_ai_cpp`, `jev_ai_bt` | C++ clients and BehaviorTree.CPP nodes (`Decide`, `JevAsk`, `Reason`) |
+| `jev_ai_bringup` | `bringup.launch.py` (servers + logger + dashboard), default params, a catalog template |
+| `ros2jev` | the `ros2 jev` CLI: `status`, `ask`, `report`, `calibrate`, `replay`, `ope`, `search` |
 
-## Files
+## The dev container
 
-- `Dockerfile`: Ubuntu 22.04 with ROS 2 Humble desktop, `ros-humble-ros-gz`, Gazebo Fortress, and the virtual display stack.
-- `docker/entrypoint.sh`: starts Xvfb, x11vnc, and noVNC when the container starts.
-- `docker/gui-fullscreen`: sizes the Gazebo and RViz windows to the virtual screen.
-- `docker-compose.yml`: builds the image, mounts the repo, and publishes the noVNC port on localhost.
-- `.dockerignore`: keeps `.git`, `.venv`, and caches out of the build context.
+ROS 2 Humble and Gazebo Fortress run in an Ubuntu 22.04 container (Docker Desktop, Apple Silicon or x86). GUI apps, such as the Gazebo GUI and `rviz2`, draw on a virtual display that you view in the browser.
+
+- **Gazebo / rviz2:** http://localhost:6080/vnc.html?resize=scale. The password is `password`, set by `VNC_PASSWORD` in the `Dockerfile`. Run `gui-fullscreen` in the container to maximise the window.
+- **Shells:** open one `docker compose exec ros2 bash` per process. They share the container, so they see each other's topics. Stop everything with `docker compose down`.
+- **Headless Gazebo:** `ign gazebo -s -r <world>.sdf`. Bridge topics with `ros2 run ros_gz_bridge parameter_bridge '/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock'`.
+
+**Troubleshooting:**
+
+- **Blank noVNC:** check `docker compose ps`, then `docker compose restart`.
+- **Wrong password:** rebuild after editing `VNC_PASSWORD`.
+- **Slow Gazebo GUI:** rendering is software-only (`llvmpipe`). Use headless mode, or shrink the window.
+- **Port 6080 or 8080 in use:** change the left side of the port mapping in `docker-compose.yml`.
+- **Stale image:** `docker compose build --no-cache`.

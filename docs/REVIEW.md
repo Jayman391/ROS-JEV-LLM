@@ -37,7 +37,7 @@
 | # | Finding | Resolution | Status |
 |---|---|---|---|
 | A1 | When the LLM times out, the sampled irreversible class a₀ commits. Also T_wait (4 s) is shorter than the LLM timeout (6 s) | On timeout commit the catalog **fallback** (which must be reversible and unmaskable), never a₀. The validator enforces `T_wait ≥ llm_timeout + 0.5 s` | ADOPT |
-| A2 | Irreversible classes can be sampled from the distribution's tail | Irreversible classes are **never sampled**. They are chosen only when they are the argmax of π by a margin `m_irrev` (default 0.2) *and* augmentation has arrived. The LLM may only **lower** their probability (one-sided pooling) | ADOPT |
+| A2 | Irreversible classes can be sampled from the distribution's tail | Irreversible classes are **never sampled**. They are chosen only when they are the argmax of π by a margin `m_irrev` (default 0.2) *and* augmentation has arrived. The LLM may only **lower** their probability (one-sided pooling) | ADOPT; the margin part **superseded** 2026-10-11 by the two-key rule (FRAMEWORK §6.4; `m_irrev` removed) |
 | A3 | No deterministic way to force an action in an emergency | Add `require()` next to `mask()`: the app can force a class, which **bypasses** both models and is recorded as `FORCED` | ADOPT |
 | A4 | A stale or racing LLM result can be applied to a changed state | Tag each request with `(decision_id, generation, state_hash, mask_hash)`. Discard the result if the generation has moved on or the mask changed. **Recompute the mask before every act.** Each question set runs in its own MutuallyExclusive callback group (a strand in C++) | ADOPT |
 | A5 | Synchronous service calls deadlock; service calls in Humble have no timeout | Calls are **async only** (`call_async` / `async_send_request`). Each request gets a client-side deadline timer, and an expired deadline counts as a failure. API nodes run the HTTP SDK on a dedicated asyncio thread bridged to ROS futures. Tests use a fake clock | ADOPT |
@@ -82,7 +82,7 @@
 | A29 | Cost when Jev is very confident | An optional cascade knob `skip_llm_above_c` (**default off**, so augmentation always runs, as you decided) | ADOPT (off) |
 | A30 | Calibration method | `ros2 jev calibrate`: a convex conditional-logit fit (A-facts) with features log p_J, log q̃, (1−c)^γ·log q̃ and per-class biases; ECE/NLL reports for q_L alone | ADOPT |
 | A31 | Offline evaluation | `ros2 jev ope`: SNIPS/DR with cluster bootstrap by group, using the logged noise and π. The episode `search` tool is kept only for τ, κ, dwell, deadline and ρ | ADOPT |
-| A32 | The hierarchy (Report/Directive) may belong in apps | Keep it in the framework as an **optional module** (`ros_jev_ai.hierarchy`). The swarm and toy examples use it; core users can ignore it | ADOPT |
+| A32 | The hierarchy (Report/Directive) may belong in apps | Keep it in the framework as an **optional module** (now `jev_ai.ros.hierarchy`, exported as `jev_ai.Hierarchy`). The swarm and toy examples use it; core users can ignore it | ADOPT |
 | A33 | Docker, k8s and the Discovery Server are not library concerns | Move them to a `ros_jev_ai_deploy` package plus examples, still shipped and maintained (your compose + k8s requirement) but never required by the library | ADOPT |
 
 ## 3. Decisions (resolved 2026-10-10)
