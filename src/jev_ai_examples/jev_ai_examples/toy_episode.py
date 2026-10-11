@@ -84,7 +84,8 @@ class ToyEpisode:
                 next_tick = now + (1.0 / qset.tick_hz if qset.tick_hz > 0 else math.inf)
                 state = world.encode(now)
                 p = {qn: self._jev(jrng, state, q) for qn, q in qset.questions.items()}
-                if decision_due(qset, triggers, p, last_p, m.current, masked, required):
+                if decision_due(qset, triggers, p, last_p, m.current, masked, required,
+                                pending=m.open is not None):
                     step = m.on_event(now, state=state, p_jev=p, masked=masked, required=required,
                                       triggers=triggers)
                     triggers, llm = [], None

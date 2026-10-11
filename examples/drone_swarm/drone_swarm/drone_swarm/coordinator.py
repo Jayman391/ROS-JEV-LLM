@@ -120,6 +120,7 @@ class Coordinator(Node):
         self.assign: dict[str, int] = {}               # drone -> sector index
         self.orders: dict[str, dict] = {}              # drone -> standing order
         self.recalled: set[str] = set()
+        self.relaunched: set[str] = set()
         self.relay: str | None = None
         self.u_fit: dict[tuple[str, int], float] = {}
         self.fit_pending: float | None = None
@@ -440,9 +441,21 @@ class Coordinator(Node):
             self.fit_pending = None                      # no fit answer: allocate without it
             self.allocate()
         self.note_surveyed()
+        self.relaunch()
         if self.fit_pending is None:
             self.handoff()
             self.dispatch_idle()
+
+    def relaunch(self) -> None:
+        """A healthy drone that went home on its own (not recalled, no fault, energy to spare)
+        takes off again and rejoins via handoff / dispatch; once per drone, so a drone that keeps
+        choosing to go home is not bounced (live: uav5 and uav7 sat out a mission at 84%)."""
+        for d, s in self.status.items():
+            if s.task == 'LANDED' and not s.airborne and d not in self.recalled | self.relaunched \
+                    and not s.critical and not s.faults and s.margin > 0.3:
+                self.relaunched.add(d)
+                self.order(d, 'takeoff', {'altitude': self.p['alt_transit']})
+                self.event(f'relaunch {d} ({s.energy_frac:.0%} battery)')
 
     def enter_confirm(self) -> None:
         for d in self.available():
@@ -1016,12 +1029,24 @@ class Coordinator(Node):
               ('plan', f'{self.plan["transit_formation"]} formation, survey '
                        f'{self.plan["survey_altitude_m"]:.0f} m ({self.plan["rationale"][:60]})'),
               ('relay', self.relay or '-')]
-        kv += [(f'event {i + 1}', f'{mmss(t - (self.t0 or t))} {e}')
-               for i, (t, e) in enumerate(list(self.events)[-6:])]
-        st = DiagnosticStatus(name='mission_coordinator', hardware_id='swarm',
-                              level=DiagnosticStatus.OK, message=self.mission_line(),
-                              values=[KeyValue(key=k, value=v) for k, v in kv])
-        a = DiagnosticArray(status=[st])
+
+        def status(name, message, rows):
+            return DiagnosticStatus(name=name, hardware_id='swarm', level=DiagnosticStatus.OK,
+                                    message=message,
+                                    values=[KeyValue(key=k, value=v) for k, v in rows])
+        # events and tracks are their own statuses: the dashboard shows each as a section
+        events = [(mmss(t - (self.t0 or t)), e) for t, e in reversed(self.events)]
+        rows = []
+        for t in tracks:
+            top = max(t.get('probs', {}).items(), key=lambda kv: kv[1], default=('?', 0.0))
+            rows.append((t['id'], f'{t["status"]} · {top[0]} {top[1]:.2f} · ({t["x"]:.0f}, '
+                                  f'{t["y"]:.0f}) · {t["sightings"]} sightings, best '
+                                  f'{t["best_alt"]:.0f} m' + (f' · {t["assigned"]}' if
+                                                              t['assigned'] else '')))
+        a = DiagnosticArray(status=[
+            status('mission_coordinator', self.mission_line(), kv),
+            status('mission events', f'{len(events)} latest', events),
+            status('mission tracks', dict(kv)['tracks'], rows)])
         a.header.stamp = arr.header.stamp
         self.diag_pub.publish(a)
         if getattr(self, 'mission_gh', None) is not None and self.phase != 'DONE':

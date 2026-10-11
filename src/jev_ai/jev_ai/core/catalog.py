@@ -24,8 +24,7 @@ DEFAULT_ACT = {NOUL: 'threshold', CHOICE: 'sample', SCORE: 'sample'}
 # Policy fields a single question may override in the catalog.
 # beta_min..eta come from `ros2 jev calibrate`, which fits them per question (§12).
 # skip_llm_above_c per question: only the questions that set it gate augmentation (§5.2 step 6).
-QUESTION_OVERRIDES = {'tau', 'kappa', 'coupling', 'coupling_directive', 'argmax_margin', 'm_irrev',
-                      'beta_min', 'beta_max', 'gamma', 'B', 'eta', 'skip_llm_above_c'}
+QUESTION_OVERRIDES = {'tau', 'kappa', 'coupling', 'coupling_directive', 'argmax_margin', 'beta_min', 'beta_max', 'gamma', 'B', 'eta', 'skip_llm_above_c'}
 
 
 class CatalogError(ValueError):
@@ -46,7 +45,6 @@ class Policy:
     coupling: float = 0.5                # rho for autonomous decisions
     coupling_directive: float = 1.0      # rho when answering a directive
     epoch_s: float = 5.0
-    m_irrev: float = math.log(2)
     argmax_margin: float = 0.1
     T_dwell: float = 5.0
     T_stale: float = 30.0
@@ -82,8 +80,6 @@ class Policy:
                      'llm_timeout', 'N_fail'):
             if getattr(self, name) <= 0:
                 raise CatalogError(f'policy.{name} must be > 0')
-        if self.m_irrev < 0:
-            raise CatalogError('policy.m_irrev must be >= 0')
         if self.T_wait < self.llm_timeout + 0.5:
             # §11: an LLM timeout must resolve before T_wait, so the timeout path is FALLBACK.
             raise CatalogError(

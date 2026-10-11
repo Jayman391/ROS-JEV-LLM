@@ -39,3 +39,4 @@ dashboard:
   ros__parameters:
     allowed_hosts: localhost,127.0.0.1,::1
     max_records: 8000
+    summary: mission_coordinator,mission_scorer      # pinned to the page's summary bar

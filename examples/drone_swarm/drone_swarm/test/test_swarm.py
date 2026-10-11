@@ -100,6 +100,22 @@ def test_formation_tail_stays_ahead_of_the_pads():
     assert ahead_shift([20.0, 30.0], SLOT_X_MIN) == 0             # already ahead: unchanged
 
 
+def test_relaunch_only_healthy_landed_drones_once():
+    """Live: uav5/uav7 landed on their own at 84% and sat out the mission; uav8 had a motor
+    fault and must stay down."""
+    def st(**kw):
+        return SimpleNamespace(**{'task': 'LANDED', 'airborne': False, 'critical': False,
+                                  'faults': [], 'margin': 0.69, 'energy_frac': 0.84, **kw})
+    orders, events = [], []
+    me = SimpleNamespace(status={'uav5': st(), 'uav7': st(), 'uav8': st(faults=['motor']),
+                                 'uav1': st(margin=0.04), 'uav2': st(task='SURVEY', airborne=True)},
+                         recalled={'uav7'}, relaunched=set(), p={'alt_transit': 40.0},
+                         order=lambda d, k, pl: orders.append((d, k)), event=events.append)
+    Coordinator.relaunch(me)
+    Coordinator.relaunch(me)                                         # once per drone
+    assert orders == [('uav5', 'takeoff')] and len(events) == 1
+
+
 def test_plan_cannot_change_survey_altitude():
     """Survey altitude is the scenario's (20 m), whatever the LLM plan says."""
     p = params()

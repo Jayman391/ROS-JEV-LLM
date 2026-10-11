@@ -37,10 +37,14 @@ def argmax_changed(prev: list[float] | None, new: list[float], margin: float) ->
 
 
 def decision_due(qset: QuestionSet, triggers, p: dict, last_p: dict, current: dict,
-                 masked: dict, required: dict) -> bool:
+                 masked: dict, required: dict, pending: bool = False) -> bool:
     """§5.3 decision event: an app/periodic trigger, no Jev answer or no current class yet, Jev's
-    argmax moved, or the current class became masked or differs from a require()."""
-    return bool(triggers) or not p or not current or any(
+    argmax moved, or the current class became masked or differs from a require().
+
+    pending = an augmentation is still open: Jev's argmax moving is then *not* an event, so a
+    flickering Jev cannot supersede the LLM answer on its way (live, 2x sim: Haiku's ~7 sim s
+    answer lost to a new decision every ~1.3 s)."""
+    return bool(triggers) or not p or not current or not pending and any(
         argmax_changed(last_p.get(qn), p[qn], qset.questions[qn].policy.argmax_margin)
         for qn in p) or any(current.get(qn) in m for qn, m in masked.items()) or any(
         current.get(qn) != c for qn, c in required.items())

@@ -253,7 +253,8 @@ class DecisionEngine:
         p = p or {}
         masked, required = self._masks(s)
         pol = s.qset.policy
-        due = decision_due(s.qset, s.triggers, p, s.last_p, s.m.current, masked, required)
+        due = decision_due(s.qset, s.triggers, p, s.last_p, s.m.current, masked, required,
+                           pending=s.m.open is not None)
         if not due or not s.state:
             if self.on_idle:
                 self.on_idle(s.qset.name)

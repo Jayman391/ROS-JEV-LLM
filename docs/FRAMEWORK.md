@@ -290,7 +290,7 @@ question_sets:
         kappa: 0.7                     # hysteresis / status-quo bonus (nats)
         coupling: 0.5                  # ρ (D3): 1.0 default when answering a directive
         argmax_margin: 0.1             # hysteresis on argmax_change triggers
-        # also per question: m_irrev, coupling_directive, and the calibrated beta_min, beta_max,
+        # also per question: skip_llm_above_c, coupling_directive, and the calibrated beta_min, beta_max,
         # gamma, B, eta and bias: {class: nats}  (written by `ros2 jev calibrate`, §12)
       urgency:
         type: score
@@ -446,12 +446,11 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 ### 6.4 Irreversible classes and non-sampled acts
 
-- **Irreversible classes** (`reversible: false`, or `until_commit` after `commit_point`) are **never sampled**. A class a is chosen only if all three hold:
-  - a = argmax z, and z(a) − max_{b≠a} z(b) ≥ `m_irrev` (default log 2), on the fused logits
-    **and** on Jev's logits alone (so the LLM can veto an irreversible class but never create one);
-  - augmentation for this decision has arrived, or `require()` forced it.
+- **Irreversible classes** (`reversible: false`, or `until_commit` after `commit_point`) are **never sampled**. They need **two keys**: a class a is chosen only if
+  - a is Jev's top unmasked class (this alone holds the current class and requests augmentation: `irreversible_pending`), **and**
+  - augmentation for this decision has arrived and a is also the LLM's top unmasked class, or `require()` forced it.
 
-  Otherwise it is excluded from §6.3. Real emergencies use `require()`, which is deterministic and never waits on an API.
+  Neither model can take an irreversible action alone; an LLM whose top class differs is a veto. Otherwise the class is excluded from §6.3. (An earlier margin rule on the fused logits, with the LLM only allowed to lower irreversible classes, made live `confirm_survivor` unreachable: Jev 0.37 and Sonnet 0.70 on the same class still lost.) Real emergencies use `require()`, which is deterministic and never waits on an API.
 - **`argmax`:** argmax of z.
 - **`expectation`** (score questions): reports `level_mean` = Σ ℓ·π(ℓ)/(L−1), `level_median`, and the full π. Apps decide which one to use.
 - **`threshold`** (noul questions): π(true) ≥ θ.
@@ -596,7 +595,6 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 | `kappa` | 0.7 nats | [0, 3] | ope |
 | `coupling` ρ | 1.0 (directive), 0.5 (autonomous) | [0, 1] | ope |
 | `epoch_s` | 5 s | | app |
-| `m_irrev` | log 2 | | ope |
 | `argmax_margin` | 0.1 | | search |
 | `T_dwell`, `T_stale`, `T_wait`, `T_refresh` | 5, 30, *llm_timeout + 0.5*, 20 s | | search |
 | `k_max` (per engine), `c_low`, `skip_llm_above_c` | 6/min, 0.5, off | | search |

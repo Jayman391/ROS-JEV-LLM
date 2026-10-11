@@ -123,6 +123,19 @@ def test_forced_and_skip(raw, qset):
     assert (s.phase, s.final, s.act, s.request_llm) == (COMMITTED, True, True, '')
 
 
+def test_open_augmentation_ignores_argmax_flicker(qset):
+    """While the LLM answer is on its way, Jev's argmax moving is not a decision event; masks,
+    require() and app triggers still are."""
+    from jev_ai.core.commitment import decision_due
+    a, b = P([0.6, 0.3, 0.1]), P([0.3, 0.6, 0.1])
+    cur = {'next_action': 'continue'}
+    assert decision_due(qset, [], b, a, cur, {}, {})
+    assert not decision_due(qset, [], b, a, cur, {}, {}, pending=True)
+    assert decision_due(qset, [], b, a, cur, {'next_action': {'continue'}}, {}, pending=True)
+    assert decision_due(qset, [], b, a, cur, {}, {'next_action': 'inspect'}, pending=True)
+    assert decision_due(qset, ['app:new_detection'], b, a, cur, {}, {}, pending=True)
+
+
 def test_per_question_skip_gates_only_that_question(raw):
     """skip_llm_above_c on next_action alone: the always-uncertain yes/no report_now can't keep
     the LLM firing."""

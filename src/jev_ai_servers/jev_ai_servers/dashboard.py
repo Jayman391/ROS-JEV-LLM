@@ -44,6 +44,8 @@ class Dashboard(Node):
         # '*' allows any Host (only behind a trusted proxy); add the robot's name/IP for LAN use
         self.allowed_hosts = {h.strip().lower() for h in
                               param('allowed_hosts', 'localhost,127.0.0.1,::1').split(',')}
+        # /diagnostics statuses whose message is pinned to the page's summary bar (app's choice)
+        self.summary = [s.strip() for s in param('summary', '').split(',') if s.strip()]
         self.records = deque(maxlen=param('max_records', 5000))
         self.labels = deque(maxlen=self.records.maxlen)
         path = param('records_path', '')
@@ -102,7 +104,8 @@ class Dashboard(Node):
         if stale or self._metrics is None:
             # ponytail: two requests may both recompute after the TTL; harmless
             self._metrics = metrics.compute(records, labels or None)
-        return report.payload(records, self._metrics, diagnostics, mode='live', n=LIVE_RECENT)
+        return {**report.payload(records, self._metrics, diagnostics, mode='live', n=LIVE_RECENT),
+                'summary': self.summary}
 
     def destroy_node(self):
         self.httpd.shutdown()

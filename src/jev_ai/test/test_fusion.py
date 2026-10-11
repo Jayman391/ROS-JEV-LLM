@@ -140,20 +140,24 @@ def test_fallback_never_masked_and_require(qset):
 
 
 def test_irreversible_rule(qset):
+    """Two keys: Jev's top class opens it (hold, ask), the LLM's top class must match."""
     q = nxt(qset)
-    near = [0.3, 0.2, 0.5]          # halt argmax but margin log(0.5/0.3)=0.51 < log 2
-    far = [0.2, 0.05, 0.75]         # margin log(3.75) > log 2
-    for e in range(200):
-        assert decide_question(q, near, key=key(e), augmented=True).selected != 'halt_now'
-    t = decide_question(q, far, key=key(), current='inspect')
+    near = [0.3, 0.2, 0.5]          # halt is Jev's top, by a small margin
+    agree, veto = [0.1, 0.1, 0.8], [0.9, 0.1, 0.0]
+    t = decide_question(q, near, key=key(), current='inspect')
     assert (t.selected, t.path) == ('inspect', 'irreversible_pending')     # hold current
-    t = decide_question(q, far, key=key(), current='halt_now')
+    t = decide_question(q, near, key=key(), current='halt_now')
     assert t.selected == 'continue'          # current not selectable -> fallback
-    t = decide_question(q, far, key=key(), augmented=True)
-    assert (t.selected, t.irreversible_path) == ('halt_now', True)
-    # an LLM that disagrees lowers the irreversible class below the margin
-    t = decide_question(q, far, key=key(), q_llm=[0.9, 0.1, 0.0], augmented=True)
-    assert t.selected != 'halt_now'
+    t = decide_question(q, near, key=key(), q_llm=agree, augmented=True)
+    assert (t.selected, t.irreversible_path) == ('halt_now', True)        # no margin needed
+    for e in range(200):                     # a disagreeing (or empty) LLM answer is a veto
+        assert decide_question(q, near, key=key(e), q_llm=veto, augmented=True).selected \
+            != 'halt_now'
+        assert decide_question(q, near, key=key(e), augmented=True).selected != 'halt_now'
+    # live regression (C6): Jev 0.37 vs 0.24 and Sonnet 0.70 on the same class now confirm
+    t = decide_question(q, [0.24, 0.0, 0.37], key=key(), q_llm=[0.12, 0.0, 0.7],
+                        masked={'inspect'}, augmented=True)
+    assert t.selected == 'halt_now' and t.irreversible_path
 
 
 def test_llm_cannot_create_an_irreversible_action(qset):

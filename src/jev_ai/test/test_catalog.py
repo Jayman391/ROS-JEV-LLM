@@ -73,6 +73,6 @@ def test_validation_rejects(raw, mutate, match):
 def test_policy_defaults_match_spec():
     p = Policy()
     assert (p.beta_min, p.beta_max, p.gamma) == (0.1, 1.0, 2.0)
-    assert p.B == pytest.approx(math.log(20)) and p.m_irrev == pytest.approx(math.log(2))
+    assert p.B == pytest.approx(math.log(20))
     assert (p.tau, p.kappa, p.coupling, p.coupling_directive) == (0.5, 0.7, 0.5, 1.0)
     assert p.T_wait == p.llm_timeout + 0.5

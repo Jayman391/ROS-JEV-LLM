@@ -218,28 +218,26 @@ def decide_question(q: QuestionSpec, p_jev: list[float] | None, *, key: NoiseKey
     return t
 
 
-def _wins_by(z: list[float], a: int, margin: float) -> bool:
-    """a is the argmax of z, ahead of every other class by >= margin."""
-    return all(z[a] - v >= margin for i, v in enumerate(z) if i != a)
-
-
 def _select(q, t, z, z_jev, mvec, ivec, current, augmented, may_switch, committed=False):
     pol, names = q.policy, q.class_names
     ci = names.index(current) if current in names else None
     held = committed and ci is not None and not mvec[ci]       # past its commit point: keep it
     cur_ok = ci is not None and not mvec[ci] and (not ivec[ci] or held)   # still selectable
 
-    # §6.4 irreversible rule: argmax with margin m_irrev, plus augmentation; never sampled.
-    # The rule must hold on Jev alone AND after fusion: the LLM can veto an irreversible class
-    # but cannot create one (e.g. by pushing every reversible class down).
-    a = max(range(len(z)), key=lambda i: z[i])
-    if ivec[a] and not (held and a == ci):
-        if _wins_by(z, a, pol.m_irrev) and _wins_by(z_jev, a, pol.m_irrev):
-            if augmented:
-                t.selected, t.path, t.irreversible_path = names[a], 'irreversible', True
-            else:   # hold the current class and wait for augmentation (§5.3)
-                t.selected = current if cur_ok else q.fallback
-                t.path = 'irreversible_pending'
+    # §6.4 irreversible rule, two keys: Jev's top unmasked class AND the LLM's; never sampled.
+    # Jev alone only opens it (hold and ask); the LLM alone can neither create nor force it,
+    # and a different LLM top class is a veto (live: a margin rule on fused logits made every
+    # confirm_survivor unreachable, since the LLM could only lower irreversible classes).
+    a = max(range(len(z_jev)), key=lambda i: z_jev[i])
+    if ivec[a] and not mvec[a] and not (held and a == ci):
+        if not augmented:   # hold the current class and wait for augmentation (§5.3)
+            t.selected = current if cur_ok else q.fallback
+            t.path = 'irreversible_pending'
+            return
+        q_llm = t.q_llm
+        if q_llm and max((i for i in range(len(q_llm)) if not mvec[i]),
+                         key=lambda i: q_llm[i]) == a:
+            t.selected, t.path, t.irreversible_path = names[a], 'irreversible', True
             return
 
     if held:

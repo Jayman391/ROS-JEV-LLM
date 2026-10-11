@@ -26,6 +26,9 @@
   --o-FALLBACK: #e34948; --o-FORCED: #e87ba4; --o-OPEN: #a9a79f; --o-PROVISIONAL: #a9a79f;
   --good: #0ca30c; --warning: #fab219; --critical: #d03b3b; --good-text: #006300;
   --accent: #2a78d6;
+  /* categorical: a question's classes, in catalog order */
+  --c0: #2a78d6; --c1: #eb6834; --c2: #1baf7a; --c3: #6250d6; --c4: #e3a300; --c5: #e87ba4;
+  --c6: #2aa9b8; --c7: #8a897f;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -37,6 +40,8 @@
     --o-COMMITTED: #3987e5; --o-KEPT: #199e70; --o-REVISED: #9085e9; --o-LLM_MISSING: #c98500;
     --o-FALLBACK: #e66767; --o-FORCED: #d55181; --o-OPEN: #6b6a64; --o-PROVISIONAL: #6b6a64;
     --good-text: #0ca30c; --accent: #3987e5;
+    --c0: #3987e5; --c1: #d95926; --c2: #199e70; --c3: #9085e9; --c4: #c98500; --c5: #d55181;
+    --c6: #2196a6; --c7: #77766d;
   }
 }
 
@@ -55,10 +60,6 @@ h3 { font-size: 13px; margin: 0; font-weight: 600; }
 .status { font-size: 12.5px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 .spacer { flex: 1; }
-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--grid); margin-bottom: 16px; }
-nav button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--ink-2);
-  font: inherit; font-weight: 600; padding: 8px 12px; cursor: pointer; }
-nav button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 select { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis);
   border-radius: 6px; padding: 4px 8px; }
 .panel { background: var(--surface); border-radius: 10px; box-shadow: 0 0 0 1px var(--ring);
@@ -96,14 +97,6 @@ td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 .strip { display: flex; flex-wrap: wrap; gap: 2px; }
 .strip button { width: 12px; height: 20px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; }
 .strip button.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
-.cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
-.card { cursor: pointer; text-align: left; font: inherit; color: inherit; border: 0; width: 100%;
-  display: flex; flex-direction: column; justify-content: flex-start; }
-.card:hover { box-shadow: 0 0 0 1px var(--axis); }
-.card.sel { box-shadow: 0 0 0 2px var(--accent); }
-.card .top { display: flex; align-items: center; gap: 8px; }
-.card .sels { margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-size: 12.5px; }
-.card .sels dt { color: var(--muted); } .card .sels dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 
 /* ---- detail ---- */
 .detail-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -145,40 +138,59 @@ td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
 .hb .name { overflow-wrap: anywhere; }
 .qtitle { font-size: 12px; color: var(--muted); font-weight: 600; margin: 10px 0 4px; }
 .qtitle:first-child { margin-top: 0; }
+
+/* ---- mission-first layout: sticky summary bar + collapsible sections (native <details>) ---- */
+.summary { position: sticky; top: 0; z-index: 5; background: var(--page); padding: 8px 0 10px;
+  display: flex; flex-wrap: wrap; gap: 6px 8px; border-bottom: 1px solid var(--grid); margin-bottom: 6px; }
+.summary .pill { background: var(--surface); box-shadow: 0 0 0 1px var(--ring); border-radius: 8px;
+  padding: 4px 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.summary .pill b { font-weight: 650; margin-right: 4px; }
+details.sec { background: var(--surface); border-radius: 10px; box-shadow: 0 0 0 1px var(--ring); margin: 8px 0;
+  scroll-margin-top: 72px; }   /* clear of the sticky summary bar */
+details.sec > summary { cursor: pointer; padding: 10px 14px; display: flex; align-items: baseline; gap: 10px;
+  list-style: none; min-width: 0; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: '▸'; color: var(--muted); display: inline-block; transition: transform .1s; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+details.sec > summary .title { font-size: 14px; font-weight: 600; white-space: nowrap; }
+details.sec > summary .sum { color: var(--ink-2); font-size: 12.5px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.sec > .body { padding: 0 14px 14px; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 2px 0 10px; }
+tr.click { cursor: pointer; }
+tr.click:hover > *, tr.sel > * { background: var(--surface-2); }
+.ebar { display: inline-block; width: 44px; height: 6px; border-radius: 3px; background: var(--grid);
+  vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.ebar > i { display: block; height: 100%; }
+
+/* ---- metrics: per-question rows (100% class bar + behaviour meters) ---- */
+.qrow { display: grid; grid-template-columns: minmax(110px, 20%) 1fr; gap: 4px 14px; padding: 10px 0;
+  border-top: 1px solid var(--grid); }
+.qrow:first-child { border-top: 0; padding-top: 0; }
+@media (max-width: 600px) { .qrow { grid-template-columns: 1fr; } }
+.stack { display: flex; height: 18px; border-radius: 4px; overflow: hidden; gap: 2px; }
+.stack > i { min-width: 2px; color: #fff; font: 600 11px/18px system-ui, sans-serif; font-style: normal;
+  padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meters { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; font-size: 12px; color: var(--ink-2); }
+.meter { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; cursor: help; }
+.meter > b { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
+.meter > b > i { display: block; height: 100%; background: var(--accent); }
+details.more > summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; padding: 8px 0; }
 </style>
 </head>
 <body>
 <header>
-  <h1>jev_ai decisions</h1>
+  <h1>jev_ai</h1>
   <span class="status" id="status"></span>
-  <span class="spacer"></span>
-  <label class="status" for="qs-filter">Question set <select id="qs-filter"></select></label>
 </header>
-<nav role="tablist">
-  <button role="tab" id="tab-live" aria-selected="true" data-tab="live">Live decisions</button>
-  <button role="tab" id="tab-metrics" aria-selected="false" data-tab="metrics">Metrics</button>
-</nav>
+<div class="summary" id="summary"></div>
 
 <main>
-  <section id="view-live">
-    <div id="health"></div>
-    <div class="section">
-      <h2>Recent decisions</h2>
-      <p class="sub">Newest on the right; one block per decision, coloured by how it ended. Click one to inspect it.</p>
-      <div class="panel"><div id="strip" class="strip"></div><div id="strip-legend" class="legend"></div></div>
-    </div>
-    <div class="section">
-      <h2>Agents</h2>
-      <p class="sub">Latest decision per agent and question set. Click a card for the full breakdown.</p>
-      <div id="cards" class="grid cards"></div>
-    </div>
-    <div class="section" id="detail-wrap"><div id="detail" class="panel"></div></div>
-  </section>
-
-  <section id="view-metrics" class="hidden">
-    <div id="kpis" class="grid kpis"></div>
-    <div id="charts" class="grid cols-2 section"></div>
-  </section>
+  <!-- sections are <details>, built by sec(): groups of like statuses (e.g. drones) as tables,
+       the app's other statuses, then decisions, servers and metrics. Closed ones aren't rendered. -->
+  <div id="s-fleet"></div>
+  <div id="s-apps"></div>
+  <div id="s-fixed"></div>
 </main>
 <div id="tip" role="tooltip"></div>
 
@@ -193,8 +205,8 @@ const OUTCOME_LABEL = {COMMITTED: 'Committed (no LLM asked)', KEPT: 'Kept after 
 const PHASE_HELP = {PROVISIONAL: 'Acted on Jev + noise; waiting for the LLM',
   REVISED: 'LLM changed the pick', KEPT: 'LLM agreed; pick kept', COMMITTED: 'Final',
   FALLBACK: 'Catalog fallback (timeout on irreversible, or Jev down)', FORCED: 'require() decided'};
-const S = {data: null, tab: 'live', qs: '', sel: null, pinned: null, live: false, lastOk: 0,
-           metricsStamp: null, error: ''};
+const S = {data: null, qs: '', agent: '', outcome: '', sel: null, pinned: null, live: false,
+           lastOk: 0, metricsStamp: null, error: ''};
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -425,77 +437,171 @@ function legend(items) {
   return `<div class="legend">${items.map(([c, l]) => `<span><i class="sw" style="background:${c}"></i>${esc(l)}</span>`).join('')}</div>`;
 }
 
-// ======================================================================= live tab
+// ======================================================================= sections
+// A section is a <details> built once and kept: only its summary line and body change, so the
+// reader's open/closed choice survives the 1 s poll (and a reload, via localStorage). A closed
+// section's body is not rendered at all.
+const lastHtml = new WeakMap();
+function setHtml(el, html) { if (lastHtml.get(el) !== html) { el.innerHTML = html; lastHtml.set(el, html); } }
+function sec(id, title, parent, {open = false, skeleton = ''} = {}) {
+  let d = document.getElementById(id);
+  if (!d) {
+    d = document.createElement('details');
+    d.className = 'sec'; d.id = id;
+    d.innerHTML = `<summary><span class="title">${esc(title)}</span><span class="sum"></span></summary><div class="body">${skeleton}</div>`;
+    let saved = null;
+    try { saved = localStorage.getItem('jev-open:' + id); } catch (e) { /* storage blocked */ }
+    d.open = saved === null ? open : saved === '1';
+    d.addEventListener('toggle', () => {
+      try { localStorage.setItem('jev-open:' + id, d.open ? '1' : '0'); } catch (e) { /* storage blocked */ }
+      if (d.open) render(true);
+    });
+    parent.appendChild(d);
+  }
+  return d;
+}
+const sumOf = (d) => d.querySelector(':scope > summary .sum');
+const bodyOf = (d) => d.querySelector(':scope > .body');
+
+// ======================================================================= status: summary bar, fleets, app, servers
 const LEVEL = [['good', 'OK', '●'], ['warning', 'Warning', '▲'], ['critical', 'Error', '■'], ['muted', 'Stale', '○']];
-function renderHealth() {
-  const diags = Object.values((S.data && S.data.diagnostics) || {});
-  if (!diags.length) { $('health').innerHTML = ''; return; }
-  const KNOWN = new Set(['backend', 'model', 'breaker', 'latency_ms_p50', 'latency_ms_p95', 'usd_last_hour',
-    'active', 'calls', 'errors', 'last_error', 'tokens_last_min']);   // the servers' card shows these its own way
-  $('health').innerHTML = `<h2>Status</h2><p class="sub">Latest /diagnostics: the jev_ai servers (circuit breaker, latency, spend over the last hour) and anything else the application publishes.</p>
-  <div class="grid health">${diags.map((d) => {
-    const v = d.values || {}, lv = LEVEL[Math.min(3, Number(d.level) || 0)];
-    const spent = parseFloat(v.usd_last_hour);
-    const other = Object.entries(v).filter(([k]) => !KNOWN.has(k));
-    return `<div class="panel">
-      <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--${lv[0]})" aria-hidden="true">${lv[2]}</span>
-        <h3 class="mono">${esc(d.name)}</h3><span class="spacer"></span><span class="badge">${lv[1]}</span></div>
-      <div class="muted" style="font-size:12.5px">${esc(d.message)}</div>
+const lvl = (d) => LEVEL[Math.min(3, Number(d.level) || 0)];
+const numeric = (a, b) => a.localeCompare(b, undefined, {numeric: true});
+const byName = (a, b) => numeric(a.name, b.name);
+
+// Servers (they report a breaker), fleets (3+ statuses with the same keys, e.g. drones: one
+// table) and everything else the app publishes (one section each).
+function classify(diags) {
+  const servers = [], groups = new Map(), apps = [], fleets = [];
+  for (const d of diags) {
+    if ('breaker' in (d.values || {})) { servers.push(d); continue; }
+    const sig = Object.keys(d.values || {}).sort().join('|');
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push(d);
+  }
+  for (const [sig, g] of groups) (sig && g.length >= 3 ? fleets.push(g.sort(byName)) : apps.push(...g));
+  return {servers: servers.sort(byName), fleets, apps: apps.sort(byName)};
+}
+
+// the app pins statuses to the bar with the dashboard's `summary` parameter
+function renderSummary(servers) {
+  const D = S.data || {}, pins = (D.summary || []).map((n) => (D.diagnostics || {})[n]).filter(Boolean);
+  const ok = servers.filter((d) => !(Number(d.level) > 0)).length;
+  const spend = servers.reduce((a, d) => a + (parseFloat(d.values.usd_last_hour) || 0), 0);
+  setHtml($('summary'), pins.map((d) => `<span class="pill"><b>${esc(d.name.replace(/_/g, ' '))}</b>${esc(d.message)}</span>`).join('') +
+    (servers.length ? `<span class="pill"><b>servers</b>${ok}/${servers.length} ok · ${usd(spend)}/h</span>` : ''));
+}
+
+// a value that starts with a percentage gets a small bar (e.g. a drone's energy)
+function cell(v) {
+  const m = /^(\d+(?:\.\d+)?)%/.exec(v || '');
+  if (!m) return esc(v);
+  const p = +m[1], c = p < 25 ? 'critical' : p < 50 ? 'warning' : 'good';
+  return `<span class="ebar"><i style="width:${Math.min(100, p)}%;background:var(--${c})"></i></span>${esc(v)}`;
+}
+function renderFleets(fleets) {
+  fleets.forEach((g) => {
+    const base = g[0].name.replace(/\d+$/, '') || 'group';
+    const d = sec('sec-fleet-' + base, `${base} ×${g.length}`, $('s-fleet'), {open: true});
+    const n = [0, 0, 0, 0];
+    g.forEach((x) => n[Math.min(3, Number(x.level) || 0)]++);
+    sumOf(d).textContent = LEVEL.map(([, l], i) => n[i] ? `${n[i]} ${l.toLowerCase()}` : '').filter(Boolean).join(' · ') +
+      ' · click a row for its decisions';
+    if (!d.open) return;
+    const keys = Object.keys(g[0].values || {});
+    setHtml(bodyOf(d), `<div class="scroll-x"><table><thead><tr><th>name</th><th>doing</th>${keys.map((k) => `<th>${esc(k)}</th>`).join('')}</tr></thead><tbody>
+      ${g.map((x) => { const l = lvl(x); return `<tr class="click ${S.agent === '/' + x.name ? 'sel' : ''}" data-agent="/${esc(x.name)}">
+        <th><span style="color:var(--${l[0]})" aria-label="${l[1]}">${l[2]}</span> ${esc(x.name)}</th><td>${esc(x.message)}</td>
+        ${keys.map((k) => `<td>${cell(x.values[k])}</td>`).join('')}</tr>`; }).join('')}</tbody></table></div>`);
+  });
+}
+function renderApps(apps) {
+  apps.forEach((x) => {
+    const d = sec('sec-app-' + x.name.replace(/\W+/g, '-'), x.name.replace(/_/g, ' '), $('s-apps'));
+    const l = lvl(x);
+    sumOf(d).innerHTML = `<span style="color:var(--${l[0]})">${l[2]}</span> ${esc(x.message)}`;
+    if (!d.open) return;
+    const rows = Object.entries(x.values || {});
+    setHtml(bodyOf(d), rows.length ? `<div class="scroll-x"><table><tbody>${rows.map(([k, v]) =>
+      `<tr><th>${esc(k)}</th><td>${cell(v)}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">No values.</div>');
+  });
+}
+function renderServers(servers) {
+  const d = sec('sec-servers', 'Servers', $('s-fixed'));
+  sumOf(d).textContent = servers.map((x) => `${x.name} ${ms(+x.values.latency_ms_p50)}`).join(' · ') || 'none reporting';
+  if (!d.open) return;
+  setHtml(bodyOf(d), `<div class="grid health">${servers.map((x) => {
+    const v = x.values, l = lvl(x), spent = parseFloat(v.usd_last_hour);
+    return `<div class="panel"><div style="display:flex;align-items:center;gap:8px"><span style="color:var(--${l[0]})" aria-hidden="true">${l[2]}</span>
+        <h3 class="mono">${esc(x.name)}</h3><span class="spacer"></span><span class="badge">${l[1]}</span></div>
+      <div class="muted" style="font-size:12.5px">${esc(x.message)}</div>
       <dl class="kv">
         ${v.backend ? `<dt>backend</dt><dd>${esc(v.backend)} ${v.model ? '· ' + esc(v.model) : ''}</dd>` : ''}
-        ${v.breaker ? `<dt>breaker</dt><dd>${esc(v.breaker.replace('_', '-'))}</dd>` : ''}
+        <dt>breaker</dt><dd>${esc(String(v.breaker).replace('_', '-'))}</dd>
         ${v.latency_ms_p50 ? `<dt>latency</dt><dd>p50 ${ms(+v.latency_ms_p50)} · p95 ${ms(+v.latency_ms_p95)}</dd>` : ''}
+        ${v.calls ? `<dt>calls</dt><dd>${esc(v.calls)} · ${esc(v.errors || 0)} errors</dd>` : ''}
+        ${v.last_error ? `<dt>last error</dt><dd>${esc(v.last_error)}</dd>` : ''}
         ${isFinite(spent) ? `<dt>spend</dt><dd>${usd(spent)} last hour</dd>` : ''}
-        ${other.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join('')}
-      </dl>
-    </div>`;
-  }).join('')}</div>`;
+      </dl></div>`; }).join('')}</div>`);
 }
 
+// ======================================================================= decisions
 function nowRef(decs) {
   return S.live ? Date.now() / 1000 : Math.max(0, ...decs.map((d) => d.t1));
-}
-
-function renderLive() {
-  const all = decisions((S.data && S.data.records) || []);
-  const decs = S.qs ? all.filter((d) => d.final.question_set === S.qs) : all;
-  renderHealth();
-  if (!decs.length) {
-    $('strip').innerHTML = '<div class="empty">No decisions yet. Start an engine (or set the dashboard\'s records_path to a JSONL log) and they will appear here.</div>';
-    $('strip-legend').innerHTML = ''; $('cards').innerHTML = ''; $('detail-wrap').classList.add('hidden');
-    return;
-  }
-  const now = nowRef(decs);
-  // timeline strip
-  const last = decs.slice(-100);
-  $('strip').innerHTML = last.map((d) => {
-    const f = d.final, sel = Object.entries(selections(f)).map(([q, c]) => `${q}: ${c}`).join('\n');
-    return `<button style="background:${oc(d.outcome)}" class="${S.pinned === d.key ? 'sel' : ''}" data-key="${esc(d.key)}"
-      aria-label="${esc(f.agent + ' ' + d.outcome)}" data-tip="${esc(`${f.agent} · ${f.question_set} #${f.decision_id}\n${OUTCOME_LABEL[d.outcome]} · ${ago(now - d.t1)} ago\n${sel}`)}"></button>`;
-  }).join('');
-  const seen = new Set(last.map((d) => d.outcome));
-  $('strip-legend').innerHTML = legend(OUTCOMES.filter((o) => seen.has(o)).map((o) => [oc(o), OUTCOME_LABEL[o]])).replace(/^<div class="legend">|<\/div>$/g, '');
-  // cards: latest decision per (agent, question set)
-  const latest = new Map();
-  for (const d of decs) latest.set(d.final.agent + '|' + d.final.question_set, d);
-  const keys = [...latest.keys()].sort();
-  if (!S.sel || !latest.has(S.sel)) S.sel = S.pinned ? S.sel : keys[0];
-  $('cards').innerHTML = keys.map((k) => {
-    const d = latest.get(k), f = d.final, ph = f.phase;
-    return `<button class="panel card ${!S.pinned && S.sel === k ? 'sel' : ''}" data-card="${esc(k)}">
-      <div class="top"><h3>${esc(f.agent)}</h3><span class="muted" style="font-size:12px">${esc(f.question_set)}</span>
-        <span class="spacer"></span><span class="badge" data-tip="${esc(PHASE_HELP[ph] || '')}"><i class="dot" style="background:${oc(ph)}"></i>${esc(ph)}</span></div>
-      <dl class="sels">${Object.entries(selections(f)).map(([q, c]) => `<dt>${esc(q)}</dt><dd>${esc(c)}</dd>`).join('')}</dl>
-      <div class="muted" style="font-size:12px;margin-top:6px">#${esc(f.decision_id)} · ${OUTCOME_LABEL[d.outcome]} · ${ago(now - d.t1)} ago</div>
-    </button>`;
-  }).join('');
-  const pinned = S.pinned && all.find((d) => d.key === S.pinned);
-  renderDetail(pinned || latest.get(S.sel), now);
 }
 function selections(r) {
   const out = {};
   for (const q of r.questions || []) if (q.selected) out[q.question] = q.selected;
   return out;
+}
+const options = (vals, cur, labels = {}) => '<option value="">All</option>' + vals.map((v) =>
+  `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(labels[v] || v)}</option>`).join('');
+
+function renderDecisions() {
+  const d = sec('sec-decisions', 'Decisions', $('s-fixed'), {skeleton: `
+    <div class="filters">
+      <label class="status">Agent <select id="f-agent"></select></label>
+      <label class="status">Question set <select id="f-qs"></select></label>
+      <label class="status">Outcome <select id="f-outcome"></select></label></div>
+    <p class="sub">Newest on the right, one block per decision, coloured by how it ended. Click a block or a row to inspect it.</p>
+    <div id="strip" class="strip"></div><div id="strip-legend" class="legend"></div>
+    <div class="qtitle" style="margin-top:14px">Latest per agent and question set</div><div id="latest" class="scroll-x"></div>
+    <div class="section hidden" id="detail-wrap"><div id="detail" class="panel"></div></div>`});
+  const all = decisions((S.data && S.data.records) || []);
+  const recent = all.slice(-200), asked = recent.filter((x) => x.records.some((r) => r.phase === 'PROVISIONAL'));
+  const used = asked.filter((x) => x.outcome === 'KEPT' || x.outcome === 'REVISED').length;
+  sumOf(d).textContent = !all.length ? 'none yet' : `${all.length} recent · last 200: LLM asked in ${pct(asked.length / recent.length, 0)}` +
+    (asked.length ? `, its answer used in ${pct(used / asked.length, 0)} of those` : '');
+  if (!d.open) return;
+  const decs = all.filter((x) => (!S.qs || x.final.question_set === S.qs) && (!S.agent || x.final.agent === S.agent) &&
+    (!S.outcome || x.outcome === S.outcome));
+  setHtml($('f-agent'), options([...new Set(all.map((x) => x.final.agent))].sort(numeric), S.agent));
+  setHtml($('f-qs'), options((S.data && S.data.metrics && S.data.metrics.question_sets) || [], S.qs));
+  setHtml($('f-outcome'), options(OUTCOMES, S.outcome, OUTCOME_LABEL));
+  if (!decs.length) {
+    setHtml($('strip'), '<div class="empty">No decisions match.</div>');
+    setHtml($('strip-legend'), ''); setHtml($('latest'), ''); $('detail-wrap').classList.add('hidden');
+    return;
+  }
+  const now = nowRef(decs), last = decs.slice(-100);
+  $('strip').innerHTML = last.map((x) => {
+    const f = x.final, sel = Object.entries(selections(f)).map(([q, c]) => `${q}: ${c}`).join('\n');
+    return `<button style="background:${oc(x.outcome)}" class="${S.pinned === x.key ? 'sel' : ''}" data-key="${esc(x.key)}"
+      aria-label="${esc(f.agent + ' ' + x.outcome)}" data-tip="${esc(`${f.agent} · ${f.question_set} #${f.decision_id}\n${OUTCOME_LABEL[x.outcome]} · ${ago(now - x.t1)} ago\n${sel}`)}"></button>`;
+  }).join('');
+  const seen = new Set(last.map((x) => x.outcome));
+  setHtml($('strip-legend'), legend(OUTCOMES.filter((o) => seen.has(o)).map((o) => [oc(o), OUTCOME_LABEL[o]])).replace(/^<div class="legend">|<\/div>$/g, ''));
+  const latest = new Map();
+  for (const x of decs) latest.set(x.final.agent + '|' + x.final.question_set, x);
+  const keys = [...latest.keys()].sort(numeric);
+  $('latest').innerHTML = `<table><thead><tr><th>agent</th><th>set</th><th>phase</th><th>selected</th><th>outcome</th><th class="n">age</th></tr></thead><tbody>
+    ${keys.map((k) => { const x = latest.get(k), f = x.final; return `<tr class="click ${!S.pinned && S.sel === k ? 'sel' : ''}" data-card="${esc(k)}">
+      <th>${esc(f.agent)}</th><td>${esc(f.question_set)}</td>
+      <td><span class="badge" data-tip="${esc(PHASE_HELP[f.phase] || '')}"><i class="dot" style="background:${oc(f.phase)}"></i>${esc(f.phase)}</span></td>
+      <td>${esc(Object.entries(selections(f)).map(([q, c]) => `${q}=${c}`).join(' · '))}</td>
+      <td>${esc(OUTCOME_LABEL[x.outcome])}</td><td class="n">${ago(now - x.t1)}</td></tr>`; }).join('')}</tbody></table>`;
+  const pinned = S.pinned && all.find((x) => x.key === S.pinned);
+  renderDetail(pinned || (S.sel && latest.get(S.sel)), now);
 }
 
 function renderDetail(d, now) {
@@ -523,7 +629,7 @@ function renderDetail(d, now) {
       ${Object.keys(params).length ? `<div class="mono" style="margin-top:4px">params ${esc(JSON.stringify(params))}</div>` : ''}</div>` : ''}
     ${(f.state || []).length ? `<div class="qtitle" style="margin-top:12px">State</div><div class="scroll-x"><table><tbody>${f.state.map((kv) => `<tr><th>${esc(kv.key)}</th><td>${esc(kv.value)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
   const up = $('unpin');
-  if (up) up.onclick = () => { S.pinned = null; renderLive(); };
+  if (up) up.onclick = () => { S.pinned = null; render(false); };
 }
 
 function questionBlock(q) {
@@ -547,7 +653,7 @@ function questionBlock(q) {
     `<span class="chip" data-tip="Probability the sampler gave this pick (for off-policy evaluation)">propensity ${fix(q.propensity)}</span>`,
     `<span class="chip" data-tip="Temperature τ and status-quo bonus κ">τ ${fix(q.tau)} · κ ${fix(q.kappa)}</span>`,
     q.group_noise ? '<span class="chip" data-tip="Used the group\'s shared Gumbel noise (coupled with the fleet)">group noise</span>' : '',
-    q.irreversible_path ? '<span class="badge" style="color:var(--critical)" data-tip="Chosen by the irreversible rule: margin on Jev and fused logits plus augmentation">⚠ irreversible</span>' : '',
+    q.irreversible_path ? '<span class="badge" style="color:var(--critical)" data-tip="Chosen by the irreversible rule: Jev and the LLM both ranked it first">⚠ irreversible</span>' : '',
     ql.length && isNum(q.llm_age_s) && q.llm_age_s > 0 ? `<span class="chip">LLM age ${q.llm_age_s.toFixed(1)} s</span>` : '',
   ].join('');
   return `<div><h3>${esc(q.question)}</h3><div class="qmeta">${chips}</div>${rows}</div>`;
@@ -596,13 +702,12 @@ function renderMetrics() {
     card('c-time', 'phases.over_time', outLegend),
     card('c-beta', 'augmentation.beta', `<div class="legend"><span>mean β ${fix(au.beta_mean)} · LLM changed the pick in ${pct(au.changed_selection_rate, 0)} of augmented decisions</span></div>`),
     card('c-conf', 'jev.confidence', `<div class="legend"><span>mean ${fix(m.jev.confidence_mean)} · Jev's first option on top ${pct(m.jev.first_option_rate, 0)} of the time</span></div>`),
-    card('c-sel', 'jev.selection'),
     card('c-jlat', 'performance.jev_latency_ms'),
     card('c-llat', 'performance.llm_latency_ms'),
     card('c-cost', 'performance.cost_series'),
     card('c-prop', 'behaviour.propensity', `<div class="legend"><span>below 0.05: ${pct(m.behaviour.low_propensity_share)} · switches ${fix(m.behaviour.switch_rate)} per agent-minute · irreversible commits ${m.behaviour.irreversible}</span></div>`),
     card('c-coup', 'coupling.agreement'),
-    card('c-qtab', {label: 'Per question', desc: 'Agreement, LLM nudge and Jev bias per question. Hover a column header for its meaning.'}),
+    card('c-q', {label: 'Per question', desc: 'What each question chose (share of decisions per class) and how Jev and the LLM behaved on it. Hover a segment or a meter for details.'}, '', true),
     card('c-cal', 'calibration', '', true),
   ].join('');
 
@@ -617,13 +722,7 @@ function renderMetrics() {
   line($('c-cost'), pf.cost_series, {color: css('llm'), fmt: usd, label: 'spent', empty: 'No LLM spend yet.', aria: 'Cumulative LLM cost'});
   histogram($('c-prop'), m.behaviour.propensity, {color: css('fused'), fmtX: (v) => v.toFixed(2), empty: 'No sampled decisions yet.'});
 
-  // per-class selection frequency
   const bq = m.by_question || {};
-  $('c-sel').innerHTML = Object.entries(bq).map(([q, s]) => {
-    const tot = Object.values(s.selection).reduce((a, b) => a + b, 0);
-    return `<div class="qtitle">${esc(q)}</div>` + hbars(Object.entries(s.selection).map(([c, n]) => (
-      {name: c, value: n, label: `${n} · ${pct(tot ? n / tot : null, 0)}`, tip: `${q} = ${c}: ${n} of ${tot}`})), Math.max(1, ...Object.values(s.selection)), css('accent'));
-  }).join('') || '<div class="empty">No selections yet.</div>';
 
   // coupling
   const cp = m.coupling;
@@ -635,16 +734,33 @@ function renderMetrics() {
     {name: q, value: v.agreement || 0, label: `${pct(v.agreement, 0)} of ${v.pairs}`})), 1, css('accent'))
     : '<div class="empty">Needs two or more agents in the same group deciding in the same epoch.</div>';
 
-  // per-question table
-  const cols = [['agreement', 'augmentation.agreement', pct], ['mean_abs_delta', 'augmentation.mean_abs_delta', fix],
-    ['argmax_flip_rate', 'augmentation.argmax_flip_rate', pct], ['first_option_rate', 'jev.first_option_rate', pct]];
+  // per question: what it chose (one 100% bar) and how Jev and the LLM behaved on it (meters)
   const sw = m.behaviour.switch_rate_by_question || {};
-  $('c-qtab').innerHTML = `<div class="scroll-x"><table><thead><tr><th>Question</th><th class="n">n</th>
-    ${cols.map(([, k]) => `<th class="n" data-tip="${esc(help(k).desc)}">${esc(help(k).label)}</th>`).join('')}
-    <th class="n" data-tip="${esc(help('behaviour.switch_rate').desc)}">Switches / agent-min</th></tr></thead><tbody>
-    ${Object.entries(bq).map(([q, s]) => `<tr><td>${esc(q)}</td><td class="n">${s.n}</td>${cols.map(([f, , fm]) => `<td class="n">${fm(s[f])}</td>`).join('')}<td class="n">${fix(sw[q])}</td></tr>`).join('')}
-    </tbody></table></div>
-    ${Object.keys(m.behaviour.flags || {}).length ? `<div class="qtitle">LLM flags</div><div class="qmeta">${Object.entries(m.behaviour.flags).map(([k, v]) => `<span class="badge">⚑ ${esc(k)} · ${v}</span>`).join('')}</div>` : ''}`;
+  const swMax = Math.max(0.1, ...Object.values(sw).filter(isNum));
+  const meter = (key, label, v, frac, fmt) => `<span class="meter" data-tip="${esc(help(key).desc || '')}">${esc(label)}
+    <b><i style="width:${isNum(frac) ? Math.max(0, Math.min(1, frac)) * 100 : 0}%"></i></b>${fmt(v)}</span>`;
+  const qrow = ([q, s]) => {
+    // colour by catalog position, so a class keeps its colour whether or not the others occur
+    const sel = Object.entries(s.selection || {}).map(([c, n], i) => [c, n, css('c' + (i % 8))]).filter(([, n]) => n);
+    const tot = sel.reduce((a, [, n]) => a + n, 0);
+    const bar = tot ? `<div class="stack">${sel.map(([c, n, col]) => `<i style="flex:${n};background:${col}"
+        data-tip="${esc(`${q} = ${c}: ${n} of ${tot} (${pct(n / tot, 0)})`)}">${n / tot >= 0.14 ? esc(c) : ''}</i>`).join('')}</div>
+      <div class="legend">${sel.map(([c, n, col]) => `<span><i class="sw" style="background:${col}"></i>${esc(c)} ${pct(n / tot, 0)}</span>`).join('')}</div>`
+      : '<div class="muted" style="font-size:12px">reports a value; selects no class</div>';
+    return `<div class="qrow"><div><div class="cname">${esc(q)}</div><div class="muted" style="font-size:12px">${s.n} decisions</div></div>
+      <div>${bar}<div class="meters">
+        ${meter('augmentation.agreement', 'LLM agrees', s.agreement, s.agreement, (v) => pct(v, 0))}
+        ${meter('augmentation.argmax_flip_rate', 'LLM flips', s.argmax_flip_rate, s.argmax_flip_rate, (v) => pct(v, 0))}
+        ${meter('augmentation.mean_abs_delta', 'nudge', s.mean_abs_delta, s.mean_abs_delta / 3, (v) => fix(v) + ' nats')}
+        ${meter('jev.first_option_rate', 'Jev 1st option', s.first_option_rate, s.first_option_rate, (v) => pct(v, 0))}
+        ${meter('behaviour.switch_rate', 'switches', sw[q], sw[q] / swMax, (v) => fix(v) + '/min')}</div></div></div>`;
+  };
+  // busiest first; generated sets (e.g. one fit question per drone x sector) go behind a dropdown
+  const qs = Object.entries(bq).sort((a, b) => b[1].n - a[1].n), TOP = 12;
+  $('c-q').innerHTML = (qs.length ? qs.slice(0, TOP).map(qrow).join('') +
+    (qs.length > TOP ? `<details class="more"><summary>${qs.length - TOP} more questions</summary>${qs.slice(TOP).map(qrow).join('')}</details>` : '')
+    : '<div class="empty">No selections yet.</div>') +
+    (Object.keys(m.behaviour.flags || {}).length ? `<div class="qtitle">LLM flags</div><div class="qmeta">${Object.entries(m.behaviour.flags).map(([k, v]) => `<span class="badge">⚑ ${esc(k)} · ${v}</span>`).join('')}</div>` : '');
 
   // calibration
   const ce = $('c-cal');
@@ -660,7 +776,18 @@ function renderMetrics() {
   S.metricsStamp = S.data.metrics.generated_at;
 }
 
-// ======================================================================= shell: tabs, filter, data
+// ======================================================================= metrics section
+function renderMetricsSec(force) {
+  const d = sec('sec-metrics', 'Metrics', $('s-fixed'),
+    {skeleton: '<div id="kpis" class="grid kpis"></div><div id="charts" class="grid cols-2 section"></div>'});
+  const m = section();
+  sumOf(d).textContent = m && m.volume && m.volume.decisions ? `${fix(m.volume.decisions_per_min, 1)} decisions/min · ` +
+    `revised ${pct(m.phases.revision_rate)} · ${usd(m.performance.cost_usd)} spent` : 'no decisions yet';
+  // charts are the heavy part: only while open, and only when the metrics changed
+  if (d.open && (force || S.metricsStamp !== (S.data && S.data.metrics && S.data.metrics.generated_at))) renderMetrics();
+}
+
+// ======================================================================= shell: data, events
 function renderStatus() {
   const D = S.data;
   if (S.live) {
@@ -670,39 +797,45 @@ function renderStatus() {
     $('status').innerHTML = `<i class="dot" style="background:var(--muted)"></i>Static report · generated ${esc(new Date((D.generated_at || 0) * 1000).toLocaleString())} · ${esc((D.metrics && D.metrics.overall.volume.records) || 0)} records · ages are relative to the last record`;
   }
 }
-function renderFilter() {
-  const sets = (S.data && S.data.metrics && S.data.metrics.question_sets) || [];
-  const html = `<option value="">All</option>` + sets.map((s) => `<option value="${esc(s)}" ${s === S.qs ? 'selected' : ''}>${esc(s)}</option>`).join('');
-  if ($('qs-filter').innerHTML !== html) $('qs-filter').innerHTML = html;
-}
 function render(force) {
   // re-rendering a section empties it for a moment (charts measure their width mid-render), and the
   // browser clamps the scroll position meanwhile: put the reader back where they were
   const y = scrollY;
-  renderStatus(); renderFilter();
-  if (S.tab === 'live') renderLive();
-  else if (force || !S.data || S.metricsStamp !== (S.data.metrics && S.data.metrics.generated_at)) renderMetrics();
+  renderStatus();
+  const {servers, fleets, apps} = classify(Object.values((S.data && S.data.diagnostics) || {}));
+  renderSummary(servers);
+  renderFleets(fleets);
+  renderApps(apps);
+  renderDecisions();
+  renderServers(servers);
+  renderMetricsSec(force);
   if (scrollY !== y) scrollTo(0, y);
 }
-document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
-  S.tab = b.dataset.tab;
-  document.querySelectorAll('nav button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
-  $('view-live').classList.toggle('hidden', S.tab !== 'live');
-  $('view-metrics').classList.toggle('hidden', S.tab !== 'metrics');
-  try { localStorage.setItem('jev-tab', S.tab); } catch (e) { /* storage blocked */ }
+document.addEventListener('change', (e) => {
+  const f = {'f-agent': 'agent', 'f-qs': 'qs', 'f-outcome': 'outcome'}[e.target.id];
+  if (!f) return;
+  S[f] = e.target.value; S.pinned = null; S.sel = null;
   render(true);
-}));
-$('qs-filter').addEventListener('change', (e) => { S.qs = e.target.value; S.pinned = null; S.sel = null; render(true); });
-$('strip').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-key]');
-  if (b) { S.pinned = b.dataset.key; renderLive(); $('detail-wrap').scrollIntoView({behavior: 'smooth', block: 'nearest'}); }
 });
-$('cards').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-card]');
-  if (b) { S.sel = b.dataset.card; S.pinned = null; renderLive(); $('detail-wrap').scrollIntoView({behavior: 'smooth', block: 'nearest'}); }
+document.addEventListener('click', (e) => {
+  const near = (el) => el.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  const b = e.target.closest('#strip button[data-key]');
+  if (b) { S.pinned = b.dataset.key; render(false); near($('detail-wrap')); return; }
+  const c = e.target.closest('tr[data-card]');
+  if (c) { S.sel = c.dataset.card; S.pinned = null; render(false); near($('detail-wrap')); return; }
+  const a = e.target.closest('tr[data-agent]');   // a fleet row: that agent's decisions
+  if (a) {
+    S.agent = S.agent === a.dataset.agent ? '' : a.dataset.agent; S.sel = null; S.pinned = null;
+    const ds = $('sec-decisions');
+    ds.open = true; render(true);
+    ds.scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
 });
 let resizeTimer;
-addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => S.tab === 'metrics' && renderMetrics(), 150); });
+addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => $('sec-metrics') && $('sec-metrics').open && renderMetrics(), 150);
+});
 
 async function poll() {
   try {
@@ -715,7 +848,6 @@ async function poll() {
 }
 
 (function start() {
-  try { const t0 = localStorage.getItem('jev-tab'); if (t0 === 'metrics') $('tab-metrics').click(); } catch (e) { /* storage blocked */ }
   const embedded = JSON.parse($('jev-data').textContent);
   if (embedded) { S.data = embedded; render(true); }
   else { S.live = true; renderStatus(); poll(); setInterval(renderStatus, 1000); }
