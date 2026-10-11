@@ -342,6 +342,7 @@ engine.set_subject(subject, qset=None)              # what the next decisions ar
 ```
 
 - The `dashboard` renders every `/diagnostics` status: the servers' cards plus anything an app publishes (the drone swarm shows its score, mission state and one card per drone).
+- It also taps every `Directive` and `Report` topic it discovers (`viz/traffic.py`). The same message seen again on another agent's topic is a relay delivery (with its latency); an agent's relay endpoint that never sees it within 3 s is a drop. The **Comms** section shows this per supervisor ⇄ worker link: a swimlane timeline, delivered/dropped counts and a filterable message log. With one shared topic (no relay) messages show as "no relay seen".
 
 - `decide_server` hosts one engine per `agent` key. For those engines, the encoder, mask and require inputs come from the goal, and decisions go out as action feedback and result.
 

@@ -176,6 +176,11 @@ tr.click:hover > *, tr.sel > * { background: var(--surface-2); }
 .meter > b { display: inline-block; width: 46px; height: 6px; border-radius: 3px; background: var(--grid); overflow: hidden; }
 .meter > b > i { display: block; height: 100%; background: var(--accent); }
 details.more > summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; padding: 8px 0; }
+
+/* ---- comms: hierarchy traffic (directives down, reports up) ---- */
+.lanes .hit { cursor: pointer; }
+td.dl { white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.pay { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -206,7 +211,7 @@ const PHASE_HELP = {PROVISIONAL: 'Acted on Jev + noise; waiting for the LLM',
   REVISED: 'LLM changed the pick', KEPT: 'LLM agreed; pick kept', COMMITTED: 'Final',
   FALLBACK: 'Catalog fallback (timeout on irreversible, or Jev down)', FORCED: 'require() decided'};
 const S = {data: null, qs: '', agent: '', outcome: '', sel: null, pinned: null, live: false,
-           lastOk: 0, metricsStamp: null, error: ''};
+           lastOk: 0, metricsStamp: null, error: '', cAgent: '', cDir: '', cStatus: '', cKind: ''};
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) =>
   ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -545,6 +550,116 @@ function renderServers(servers) {
       </dl></div>`; }).join('')}</div>`);
 }
 
+// ======================================================================= comms (hierarchy traffic)
+// The server matches each Directive/Report across topics: a copy on a relay's far side is a
+// delivery, a missing copy a drop (viz/traffic.py). Times are the sender's clock from the first message.
+const DIR_LABEL = {down: 'Orders ↓ (directives)', up: 'Reports ↑'};
+const LINK_LABEL = {ok: 'Delivered', lost: 'Dropped', pending: 'In flight', sent: 'No relay seen'};
+const mmss = (s) => isNum(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '–';
+const rateColor = (r) => r >= 0.9 ? 'good' : r >= 0.7 ? 'warning' : 'critical';
+const pairName = (p, many) => many ? `${p.supervisor} ⇄ ${p.worker}` : p.worker;
+
+function delivered(c) {
+  const done = c.ok + c.lost, r = done ? c.ok / done : null;
+  if (!c.sent) return '<span class="muted">–</span>';
+  return (isNum(r) ? `<span class="ebar"><i style="width:${r * 100}%;background:var(--${rateColor(r)})"></i></span>` : '') +
+    `${c.ok}/${c.sent}` + (c.pending ? ` <span class="muted">(${c.pending} in flight)</span>` : '');
+}
+
+// One row per link: orders grow up from the midline, reports down; dropped ones in red at the tip.
+function swimlanes(el, pairs, tl, many) {
+  const W = width(el), L = many ? 190 : 70, R = 8, rowH = 34, T = 4, B = 20, H = T + pairs.length * rowH + B;
+  const bw = (W - L - R) / tl.buckets, span = tl.t1 - tl.t0, half = rowH / 2 - 3;
+  const peak = (keys) => Math.max(1, ...pairs.flatMap((p) => p.lanes[keys[0]].map((v, i) => v + p.lanes[keys[1]][i])));
+  const kDown = half / peak(['down', 'down_lost']), kUp = half / peak(['up', 'up_lost']);
+  let s = '';
+  pairs.forEach((p, r) => {
+    const mid = T + r * rowH + rowH / 2, ln = p.lanes;
+    s += `<text class="lbl" x="${L - 8}" y="${mid + 4}" text-anchor="end">${esc(pairName(p, many))}</text>` +
+      `<line class="ax" x1="${L}" x2="${W - R}" y1="${mid}" y2="${mid}"/>`;
+    for (let i = 0; i < tl.buckets; i++) {
+      const x = L + i * bw + 0.5, w = Math.max(1, bw - 1);
+      const dOk = ln.down[i] * kDown, dLost = ln.down_lost[i] * kDown, uOk = ln.up[i] * kUp, uLost = ln.up_lost[i] * kUp;
+      if (dOk) s += `<rect x="${x}" y="${mid - dOk}" width="${w}" height="${dOk}" fill="var(--c0)"/>`;
+      if (dLost) s += `<rect x="${x}" y="${mid - dOk - dLost}" width="${w}" height="${dLost}" fill="var(--critical)"/>`;
+      if (uOk) s += `<rect x="${x}" y="${mid}" width="${w}" height="${uOk}" fill="var(--c2)"/>`;
+      if (uLost) s += `<rect x="${x}" y="${mid + uOk}" width="${w}" height="${uLost}" fill="var(--critical)"/>`;
+      const n = ln.down[i] + ln.down_lost[i] + ln.up[i] + ln.up_lost[i];
+      if (n) {
+        const a = span * i / tl.buckets, b = span * (i + 1) / tl.buckets;
+        s += `<rect class="hit" x="${x}" y="${mid - half}" width="${w}" height="${2 * half}" data-comms-agent="${esc(p.worker)}"
+          data-tip="${esc(`${pairName(p, true)} · ${mmss(a)}–${mmss(b)}\norders ↓ ${ln.down[i] + ln.down_lost[i]} (${ln.down_lost[i]} dropped)\nreports ↑ ${ln.up[i] + ln.up_lost[i]} (${ln.up_lost[i]} dropped)\nclick: this link's messages`)}"/>`;
+      }
+    }
+  });
+  const yAx = T + pairs.length * rowH + 14;
+  s += [0, 0.25, 0.5, 0.75, 1].map((f) => `<text x="${L + f * (W - L - R)}" y="${yAx}" text-anchor="${f === 0 ? 'start' : f === 1 ? 'end' : 'middle'}">${mmss(f * span)}</text>`).join('');
+  setHtml(el, `<svg class="chart lanes" width="${W}" height="${H}" role="img" aria-label="Messages per link over time">${s}</svg>`);
+}
+
+function renderComms() {
+  const T = S.data && S.data.traffic;
+  if (!T) return;                                    // static reports carry no traffic
+  const d = sec('sec-comms', 'Comms', $('s-fixed'), {skeleton: `
+    <p class="sub">Every directive (supervisor → worker) and report (worker → supervisor) on the bus, matched across relays: a copy on the far side is a delivery, a missing one a drop. Click a lane or a row for that link's messages.</p>
+    <div id="lanes"></div>
+    <div id="lanes-legend"></div>
+    <div class="qtitle" style="margin-top:14px">Links</div><div id="links" class="scroll-x"></div>
+    <div class="qtitle" style="margin-top:14px">Messages</div>
+    <div class="filters">
+      <label class="status">Agent <select id="c-agent"></select></label>
+      <label class="status">Direction <select id="c-dir"></select></label>
+      <label class="status">Delivery <select id="c-status"></select></label>
+      <label class="status">Kind <select id="c-kind"></select></label></div>
+    <div id="msgs" class="scroll-x"></div>`});
+  const pairs = T.pairs || [], msgs = T.messages || [];
+  const sum = (dir, k) => pairs.reduce((a, p) => a + p[dir][k], 0);
+  const lost = sum('down', 'lost') + sum('up', 'lost'), done = lost + sum('down', 'ok') + sum('up', 'ok');
+  const lats = pairs.map((p) => p.latency_ms_p50).filter(isNum).sort((a, b) => a - b);
+  sumOf(d).textContent = !pairs.length ? 'no directives or reports yet' :
+    `orders ↓ ${sum('down', 'ok')}/${sum('down', 'sent')} delivered · reports ↑ ${sum('up', 'ok')}/${sum('up', 'sent')} · ` +
+    `${lost} dropped${done ? ` (${pct(lost / done, 0)})` : ''}` + (lats.length ? ` · median latency ${ms(lats[lats.length >> 1])}` : '');
+  if (!d.open) return;
+  if (!pairs.length) { setHtml($('lanes'), '<div class="empty">No hierarchy traffic yet.</div>'); return; }
+  const many = new Set(pairs.map((p) => p.supervisor)).size > 1;
+  swimlanes($('lanes'), pairs, T.timeline, many);
+  setHtml($('lanes-legend'), legend([['var(--c0)', 'orders ↓ delivered'], ['var(--c2)', 'reports ↑ delivered'], ['var(--critical)', 'dropped']]));
+  setHtml($('links'), `<table><thead><tr><th>link</th><th>orders ↓ delivered</th><th>reports ↑ delivered</th><th class="n">dropped</th>
+    <th class="n">latency p50</th><th class="n">last heard</th><th>last message</th></tr></thead><tbody>
+    ${pairs.map((p) => { const l = p.down.lost + p.up.lost, n = l + p.down.ok + p.up.ok;
+      return `<tr class="click ${S.cAgent === p.worker ? 'sel' : ''}" data-comms-agent="${esc(p.worker)}"><th>${esc(pairName(p, many))}</th>
+      <td>${delivered(p.down)}</td><td>${delivered(p.up)}</td>
+      <td class="n" style="color:var(--${!l ? 'ink-2' : l / n >= 0.3 ? 'critical' : 'warning'})">${l}${n ? ` · ${pct(l / n, 0)}` : ''}</td>
+      <td class="n">${ms(p.latency_ms_p50)}</td><td class="n">${isNum(p.last_t) ? ago(T.timeline.t1 - p.last_t) + ' ago' : '–'}</td>
+      <td>${esc(p.last)}</td></tr>`; }).join('')}</tbody></table>`);
+  // messages: a broadcast is one row; with an agent picked, only that agent's copy counts
+  const agents = [...new Set(pairs.flatMap((p) => [p.supervisor, p.worker]))].sort(numeric);
+  setHtml($('c-agent'), options(agents, S.cAgent));
+  setHtml($('c-dir'), options(['down', 'up'], S.cDir, DIR_LABEL));
+  setHtml($('c-status'), options(['ok', 'lost', 'pending', 'sent'], S.cStatus, LINK_LABEL));
+  setHtml($('c-kind'), options([...new Set(msgs.map((m) => m.kind))].sort(), S.cKind));
+  const rows = [];
+  for (const m of msgs) {
+    if ((S.cDir && m.dir !== S.cDir) || (S.cKind && m.kind !== S.cKind)) continue;
+    let to = m.to.length ? m.to : [[m.target && m.target !== '*' ? m.target : '*', 'sent', null]];
+    if (S.cAgent && m.from !== S.cAgent) to = to.filter((x) => x[0] === S.cAgent);
+    if (!to.length || (S.cStatus && !to.some((x) => x[1] === S.cStatus))) continue;
+    rows.push([m, to]);
+    if (rows.length >= 100) break;
+  }
+  const t0 = T.timeline.t0, mark = {ok: '✓', lost: '✗', pending: '…', sent: '–'};
+  const one = ([, st, lat]) => `<span style="color:var(--${st === 'ok' ? 'good-text' : st === 'lost' ? 'critical' : 'muted'})">${mark[st]} ${st === 'ok' ? ms(lat) : esc(LINK_LABEL[st].toLowerCase())}</span>`;
+  setHtml($('msgs'), !rows.length ? '<div class="empty">No messages match.</div>' :
+    `<table><thead><tr><th class="n">time</th><th>from → to</th><th>kind</th><th>about</th><th>delivery</th><th>payload</th></tr></thead><tbody>
+    ${rows.map(([m, to]) => { const by = {}; to.forEach((x) => { by[x[1]] = (by[x[1]] || 0) + 1; });
+      return `<tr><td class="n">${mmss(m.t - t0)}</td>
+      <td>${esc(m.from)} ${m.dir === 'down' ? '↓' : '↑'} ${to.length === 1 ? esc(to[0][0]) : `${to.length} agents`}</td>
+      <td>${esc(m.kind)}</td><td>${esc(m.subject || (m.target === '*' ? 'broadcast' : ''))}</td>
+      <td class="dl" data-tip="${esc(to.map((x) => `${x[0]}: ${LINK_LABEL[x[1]]}${isNum(x[2]) ? ' ' + ms(x[2]) : ''}`).join('\n'))}">${to.length === 1 ? one(to[0]) :
+        Object.entries(by).map(([st, n]) => `<span style="color:var(--${st === 'ok' ? 'good-text' : st === 'lost' ? 'critical' : 'muted'})">${n} ${mark[st]}</span>`).join(' · ')}</td>
+      <td class="pay mono" data-tip="${esc(m.payload)}">${esc(m.payload)}</td></tr>`; }).join('')}</tbody></table>`);
+}
+
 // ======================================================================= decisions
 function nowRef(decs) {
   return S.live ? Date.now() / 1000 : Math.max(0, ...decs.map((d) => d.t1));
@@ -806,12 +921,15 @@ function render(force) {
   renderSummary(servers);
   renderFleets(fleets);
   renderApps(apps);
+  renderComms();
   renderDecisions();
   renderServers(servers);
   renderMetricsSec(force);
   if (scrollY !== y) scrollTo(0, y);
 }
 document.addEventListener('change', (e) => {
+  const c = {'c-agent': 'cAgent', 'c-dir': 'cDir', 'c-status': 'cStatus', 'c-kind': 'cKind'}[e.target.id];
+  if (c) { S[c] = e.target.value; render(false); return; }
   const f = {'f-agent': 'agent', 'f-qs': 'qs', 'f-outcome': 'outcome'}[e.target.id];
   if (!f) return;
   S[f] = e.target.value; S.pinned = null; S.sel = null;
@@ -821,6 +939,8 @@ document.addEventListener('click', (e) => {
   const near = (el) => el.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   const b = e.target.closest('#strip button[data-key]');
   if (b) { S.pinned = b.dataset.key; render(false); near($('detail-wrap')); return; }
+  const ca = e.target.closest('[data-comms-agent]');    // a comms lane or link row: its messages
+  if (ca) { S.cAgent = S.cAgent === ca.dataset.commsAgent ? '' : ca.dataset.commsAgent; render(false); near($('msgs')); return; }
   const c = e.target.closest('tr[data-card]');
   if (c) { S.sel = c.dataset.card; S.pinned = null; render(false); near($('detail-wrap')); return; }
   const a = e.target.closest('tr[data-agent]');   // a fleet row: that agent's decisions

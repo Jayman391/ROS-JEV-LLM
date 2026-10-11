@@ -10,7 +10,7 @@ import urllib.request
 import pytest
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from jev_ai_msgs.msg import DecisionRecord
+from jev_ai_msgs.msg import DecisionRecord, Directive, Report
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -116,6 +116,32 @@ def test_records_path_preload(records, tmp_path):
         assert m['volume']['records'] == len(records)
         assert m['volume']['agents'] == 2
         assert 0 < len(state['records']) <= len(records)
+    finally:
+        stop(node, pub_node, ex)
+
+
+def test_hierarchy_traffic_is_tapped_across_a_relay():
+    node, pub_node, ex = start('/dash_tr')
+    try:
+        sup, uav = '/dash_tr/coordinator', '/dash_tr/uav1'
+        pubs = {t: pub_node.create_publisher(cls, t, 10) for t, cls in (
+            (sup + '/directives', Directive), (uav + '/directives', Directive),
+            (uav + '/reports', Report))}
+        wait_for(lambda: all(p.get_subscription_count() > 0 for p in pubs.values()))
+        order = Directive(issuer=sup, directive_id=7, target=uav, kind='survey',
+                          payload='{"sector": 2}')
+
+        def delivered():
+            # best effort: the tap may not have matched yet, so resend (same keys, seen once)
+            pubs[uav + '/reports'].publish(Report(agent=uav, kind='nominal', payload='{}'))
+            pubs[sup + '/directives'].publish(order)
+            pubs[uav + '/directives'].publish(order)             # the relay's copy
+            t = json.loads(get(node.port, '/api/state')[1])['traffic']
+            p = [p for p in t['pairs'] if (p['supervisor'], p['worker']) == (sup, uav)]
+            return t if p and p[0]['down']['ok'] == 1 else None
+        t = wait_for(delivered)
+        m = next(m for m in t['messages'] if m['kind'] == 'survey')
+        assert m['from'] == sup and m['to'][0][:2] == [uav, 'ok'] and '"sector"' in m['payload']
     finally:
         stop(node, pub_node, ex)
 

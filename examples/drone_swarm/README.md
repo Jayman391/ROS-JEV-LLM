@@ -16,7 +16,7 @@ In the dev container (`docker compose up -d` at the repo root, then `docker comp
 colcon build && source install/setup.bash
 ros2 launch drone_swarm swarm.launch.py gui:=true      # keyless mocks; mission auto-starts
 #   Gazebo:                 http://localhost:6080/vnc.html  (run `gui-fullscreen` to maximise)
-#   decisions + swarm:      http://localhost:8080
+#   decisions + swarm:      http://localhost:8080  (Comms: every order down / report up per drone)
 ros2 launch drone_swarm swarm.launch.py gui:=true jev_backend:=typesafe llm_backend:=anthropic
 ros2 launch drone_swarm swarm.launch.py seed:=3 t_max_s:=1200
 ```

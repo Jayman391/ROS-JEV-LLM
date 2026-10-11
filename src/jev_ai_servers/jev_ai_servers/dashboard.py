@@ -3,9 +3,11 @@
 Subscribes ``decisions`` (DecisionRecord), ``labels`` (Label) and ``/diagnostics``, keeps the
 last ``max_records`` records, and serves ``jev_ai/viz/dashboard.html`` at ``/`` and the page's
 data at ``/api/state``: recent records, latest diagnostics per status name, and
-``metrics.compute`` over everything kept (cached ~2 s). Read-only and without auth, so ``host``
-defaults to 127.0.0.1 (in a container, bind 0.0.0.0 and publish the port on the host's loopback).
-Requests whose Host header is not in ``allowed_hosts`` get 403, which stops DNS rebinding.
+``metrics.compute`` over everything kept (cached ~2 s). It also finds every Directive and Report
+topic (hierarchy traffic, relayed copies included) and serves ``viz.traffic`` as ``traffic``.
+Read-only and without auth, so ``host`` defaults to 127.0.0.1 (in a container, bind 0.0.0.0 and
+publish the port on the host's loopback). Requests whose Host header is not in ``allowed_hosts``
+get 403, which stops DNS rebinding.
 
     ros2 run jev_ai_servers dashboard --ros-args -p port:=8080 -p records_path:=decisions.jsonl
 """
@@ -19,7 +21,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from diagnostic_msgs.msg import DiagnosticArray
-from jev_ai_msgs.msg import DecisionRecord, Label
+from jev_ai_msgs.msg import DecisionRecord, Directive, Label, Report
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from rosidl_runtime_py import message_to_ordereddict
@@ -27,9 +29,13 @@ from rosidl_runtime_py import message_to_ordereddict
 from jev_ai.core import metrics
 from jev_ai.ros.engine import run
 from jev_ai.viz import report
+from jev_ai.viz.traffic import Traffic
 
 METRICS_TTL_S = 2.0
 LIVE_RECENT = 200          # records per poll: the page polls every second
+HIERARCHY = {'jev_ai_msgs/msg/Directive': Directive, 'jev_ai_msgs/msg/Report': Report}
+# best effort matches both the reliable directive and the best-effort report publishers
+TAP_QOS = QoSProfile(depth=200, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 def to_dict(msg) -> dict:
@@ -60,6 +66,9 @@ class Dashboard(Node):
         self.create_subscription(DecisionRecord, 'decisions', self._on_record, qos)
         self.create_subscription(Label, 'labels', self._on_label, qos)
         self.create_subscription(DiagnosticArray, '/diagnostics', self._on_diagnostics, 10)
+        self.traffic, self.tapped = Traffic(), set()
+        self._discover()
+        self.create_timer(2.0, self._discover)
 
         self.page = report.render().encode()
         self.httpd = ThreadingHTTPServer((host, port), _handler(self))
@@ -92,12 +101,34 @@ class Dashboard(Node):
                     'hardware_id': s.hardware_id, 'stamp': stamp,
                     'values': {kv.key: kv.value for kv in s.values}}
 
+    def _discover(self) -> None:
+        for topic, types in self.get_topic_names_and_types():
+            cls = next((HIERARCHY[t] for t in types if t in HIERARCHY), None)
+            if cls and topic not in self.tapped:
+                self.tapped.add(topic)
+                self.create_subscription(cls, topic, lambda m, t=topic: self._on_hierarchy(t, m),
+                                         TAP_QOS)
+
+    def _on_hierarchy(self, topic: str, m) -> None:
+        h = m.header.stamp
+        stamp = h.sec + h.nanosec * 1e-9
+        if isinstance(m, Directive):
+            args = ('down', topic, ('D', m.issuer, m.directive_id))
+            kw = {'sender': m.issuer, 'target': m.target}
+        else:
+            args = ('up', topic, ('R', m.agent, h.sec, h.nanosec, m.kind))
+            kw = {'sender': m.agent, 'subject': m.subject, 'priority': m.priority}
+        with self.lock:
+            self.traffic.observe(*args, kind=m.kind, stamp=stamp, payload=m.payload,
+                                 wall=time.monotonic(), **kw)
+
     # --- http -----------------------------------------------------------------------------------
 
     def state(self) -> dict:
         with self.lock:
             records, labels = list(self.records), list(self.labels)
             diagnostics = dict(self.diagnostics)
+            traffic = self.traffic.snapshot(time.monotonic())
             stale = self._dirty and time.monotonic() - self._metrics_t >= METRICS_TTL_S
             if stale:
                 self._dirty, self._metrics_t = False, time.monotonic()
@@ -105,7 +136,7 @@ class Dashboard(Node):
             # ponytail: two requests may both recompute after the TTL; harmless
             self._metrics = metrics.compute(records, labels or None)
         return {**report.payload(records, self._metrics, diagnostics, mode='live', n=LIVE_RECENT),
-                'summary': self.summary}
+                'summary': self.summary, 'traffic': metrics.json_safe(traffic)}
 
     def destroy_node(self):
         self.httpd.shutdown()
