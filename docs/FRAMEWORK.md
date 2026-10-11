@@ -337,7 +337,11 @@ DecisionEngine(node, catalog,                     # any rclpy Node / LifecycleNo
 engine.trigger(name, qset=None, priority="normal")  # app events
 engine.completed(question)                          # current action finished → decision event
 engine.commit_point(question)                       # `until_commit` class becomes irreversible
+engine.set_subject(subject, qset=None)              # what the next decisions are about (records'
+                                                    # `subject`; Labels join on it), e.g. from encode_state
 ```
+
+- The `dashboard` renders every `/diagnostics` status: the servers' cards plus anything an app publishes (the drone swarm shows its score, mission state and one card per drone).
 
 - `decide_server` hosts one engine per `agent` key. For those engines, the encoder, mask and require inputs come from the goal, and decisions go out as action feedback and result.
 
@@ -520,7 +524,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 - **Defaults:** `model` and `effort` are per server instance, e.g. one `llm_server` with Haiku `low` and one with Sonnet `medium`. Clients pick a server by remapping.
 - **Budgets (both servers, A25):**
-  - `max_rps`, `max_tokens_per_min`. Spend (USD, from a pricing table in config) is reported, not capped, while this is a prototype.
+  - `max_rps`. Tokens per minute and spend (USD, from a pricing table in config) are reported, not capped, while this is a prototype.
   - A circuit breaker opens after N errors or budget exhaustion. While it is open the server rejects goals fast, and engines degrade to δ ≡ 0 (Jev only) or keep the current class (Jev).
   - Budget state is published in diagnostics and checked by `ros2 jev status`.
 - **Cancellation:** a cancelled goal aborts the HTTP stream.
@@ -579,7 +583,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 
 - **Image:** `deploy/docker/Dockerfile`, `ros:<distro>-ros-base` + rosdep + the pinned SDKs from `requirements.txt` (pip; `--break-system-packages` on Jazzy's PEP 668 Python) + the workspace. One image runs every node; Humble and Jazzy build and run the toy.
 - **Compose:** `deploy/compose/compose.yaml` (`x-jev-ai-node` anchor; `jev_server`, `llm_server`, `decision_logger`, `dashboard`, and `decide_server` under profile `decide`). Apps `include:` it with an env file (`toy.yaml` + `toy.env`). Keys come from the repo's `.env`.
-- **Kustomize:** `deploy/k8s/base` (servers, logger with a PVC, dashboard; ConfigMaps `jev-ai-env` and `jev-ai-params`; an optional `jev-ai-keys` Secret as env vars) plus overlays whose agents are StatefulSets where the ordinal gives the agent name (`toy`, `turtlesim`).
+- **Kustomize:** `deploy/k8s/base` (servers, logger with a PVC, dashboard; ConfigMaps `jev-ai-env` and `jev-ai-params`; an optional `jev-ai-keys` Secret as env vars) plus overlays whose agents are StatefulSets where the ordinal gives the agent name (`toy`, `turtlesim`, `swarm`).
 - **DDS:** multicast discovery on the compose network and on a single-node cluster's pod network. A Fast DDS Discovery Server is needed only for multi-node clusters and is not included yet.
 
 ## 14. Parameters (defaults; catalog `policy:` and ROS params override)
@@ -598,7 +602,7 @@ Status-quo preference is expressed **explicitly** through κ. Catalog order stil
 | `k_max` (per engine), `c_low`, `skip_llm_above_c` | 6/min, 0.5, off | | search |
 | `reuse_stale_llm` | false | | |
 | `jev_timeout`, `llm_timeout`, `N_fail` | 1 s, 6 s, 3 | | |
-| server `max_rps`, `max_tokens_per_min` | 50 (llm 10), 200k | | ops |
+| server `max_rps` | 50 (llm 10) | | ops |
 
 ## 15. Non-goals (v1)
 

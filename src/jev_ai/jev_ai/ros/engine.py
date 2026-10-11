@@ -169,6 +169,13 @@ class DecisionEngine:
                 if question in s.qset.questions:
                     s.m.commit_point(question)
 
+    def set_subject(self, subject: str, qset: str | None = None) -> None:
+        """What the next decisions are about (records' ``subject``; Labels join on it). Safe to
+        call from ``encode_state``, e.g. when the encoder picks which detection to describe."""
+        with self.lock:
+            for s in self._targets(qset):
+                s.subject = subject
+
     def current(self, qset: str) -> dict[str, str]:
         return dict(self.sets[qset].m.current)
 

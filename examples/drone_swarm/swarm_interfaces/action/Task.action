@@ -1,0 +1,19 @@
+# A flight primitive (SYSTEM_MODEL §5.1). A new goal preempts the current one, except LAND below
+# 2 m. Zero fields take the primitive's default.
+string primitive                 # TAKEOFF | GOTO | HOLD | SURVEY | ORBIT | FORMATION_SLOT | RTB | LAND
+geometry_msgs/Point target       # GOTO / FORMATION_SLOT point, ORBIT centre (z ignored: see altitude)
+geometry_msgs/Point[] area       # SURVEY: two opposite corners of the sector rectangle
+float64 altitude
+float64 speed
+float64 radius                   # ORBIT
+int32 laps                       # ORBIT
+float64 duration                 # HOLD: 0 = until replaced
+float64 lane_spacing             # SURVEY
+string detail                    # label for status ("sector 2", "uav1-3")
+---
+bool success
+string message
+---
+string state
+float64 progress
+float64 eta_s

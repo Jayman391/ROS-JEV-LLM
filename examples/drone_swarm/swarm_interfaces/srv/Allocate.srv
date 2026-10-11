@@ -1,0 +1,7 @@
+# Minimum-cost assignment (Hungarian, O(n^3)). cost is row-major, rows x cols.
+float64[] cost
+uint32 rows
+uint32 cols
+---
+int32[] assignment       # per row: the column, -1 = unassigned (rows > cols)
+float64 total

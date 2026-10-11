@@ -32,7 +32,7 @@ optional Secret: `kubectl -n jev-ai create secret generic jev-ai-keys --from-env
 set `JEV_BACKEND=typesafe` / `LLM_BACKEND=anthropic` in the overlay's `jev-ai-env`.
 
 **Resources and budgets.** Pods request 50m CPU / 128Mi and are capped at 500m / 384–512Mi; API
-spend is bounded by the servers' `max_rps` / `max_tokens_per_min` and circuit breakers
+calls are bounded by the servers' `max_rps` and circuit breakers
 (`params.yaml`), reported on the dashboard and by `ros2 jev status`.
 
 **DDS.** Discovery is multicast on the compose network and on a single-node cluster's pod

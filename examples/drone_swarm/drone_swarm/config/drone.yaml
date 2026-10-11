@@ -1,0 +1,86 @@
+# Drone swarm: the drone agent's catalog (DECISION_MODEL §3.1). Status-quo class first.
+# W2/W3 are always asked (jev_ai has no conditional questions); the agent ignores them while
+# detection = none.
+catalog_version: 1
+name: sar_drone
+question_sets:
+  step:
+    state_keys: [mission, task, energy, home, link, hazards, detection, other_detections, health,
+                 coordinator, wind]
+    tick_hz: 1.0
+    augment: true
+    group: swarm
+    questions:
+      next_action:                                   # W1
+        type: choice
+        instructions: "Choose this search-and-rescue drone's next action."
+        act: sample
+        classes:
+          - {name: continue, criteria: "Keep doing the assigned task; nothing requires a change.", reversible: true}
+          - {name: inspect, criteria: "Fly lower to look at the unresolved detection; worthwhile if it may be a survivor and energy allows.", reversible: until_commit}
+          - {name: hold, criteria: "Hover and wait; the situation is unclear or orders are awaited.", reversible: true}
+          - {name: return_to_base, criteria: "Go home now; energy, health or link make continuing unsafe or pointless.", reversible: true}
+          - {name: request_support, criteria: "Keep working but ask the coordinator for help or a handoff.", reversible: true}
+          - {name: land_now, criteria: "Emergency landing in place; only for a critical failure.", reversible: false}
+        fallback: continue
+        tau: 0.5
+        kappa: 0.7
+        coupling: 0.5
+        coupling_directive: 1.0
+      detection_class:                               # W2
+        type: choice
+        instructions: "What is the detected object most likely to be? Sightings from higher altitude are less reliable; consistent repeated sightings are more reliable."
+        act: none
+        classes:
+          - {name: survivor, criteria: "A person needing rescue."}
+          - {name: animal}
+          - {name: vehicle}
+          - {name: debris, criteria: "Rubble, wreckage or other inanimate clutter."}
+          - {name: nothing, criteria: "A false alarm; no real object."}
+      detection_priority:                            # W3
+        type: score
+        instructions: "How important is it to resolve this detection soon?"
+        classes: [{name: ignore}, {name: low}, {name: moderate}, {name: high}, {name: urgent}]
+        act: expectation
+      energy_risk:                                   # W4 (advisory: H6 is deterministic)
+        type: score
+        instructions: "How risky is the drone's energy situation for finishing its task and getting home, considering wind and distance?"
+        classes: [{name: comfortable}, {name: adequate}, {name: tight}, {name: critical}]
+        act: expectation
+      report_now:                                    # W5
+        type: noul
+        instructions: "Should the drone send a report to the coordinator now?"
+        criteria: {"true": "Something changed that the coordinator should know.", "false": "Nothing new."}
+        act: threshold
+        threshold: 0.5
+      unusual:                                       # W6
+        type: noul
+        instructions: "Is this situation unusual, or poorly covered by routine behaviour?"
+        criteria: {"true": "Novel, conflicting or surprising signals.", "false": "Routine."}
+        act: threshold
+        threshold: 0.5
+      situation:                                     # W7 -> Report.kind
+        type: choice
+        instructions: "Which best summarises the drone's situation?"
+        act: argmax
+        classes:
+          - {name: nominal}
+          - {name: candidate_found, criteria: "A detection that may be a survivor needs attention."}
+          - {name: energy_concern}
+          - {name: hazard, criteria: "An obstacle, no-fly zone or another drone is close."}
+          - {name: link_concern}
+          - {name: fault, criteria: "A battery, GPS or motor fault."}
+          - {name: task_complete}
+    llm_params:
+      inspect_altitude_m: {min: 8, max: 15, default: 10}
+      orbit_radius_m: {min: 4, max: 10, default: 6}
+      orbit_laps: {min: 1, max: 2, default: 1}
+      hold_s: {min: 0, max: 60, default: 0}
+    llm:
+      system: "You are the onboard reasoning module of {agent}, one drone in a search-and-rescue swarm. Finding and confirming survivors matters most, but never at the cost of the drone: respect energy, link and hazards. Follow the coordinator's orders unless the situation clearly calls for something else."
+policy:
+  T_dwell: 3.0
+  T_refresh: 20.0
+  k_max: 6                       # augmentations/min per drone (DECISION_MODEL §6)
+  llm_timeout: 6.0
+  epoch_s: 5.0

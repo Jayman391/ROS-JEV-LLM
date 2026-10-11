@@ -6,7 +6,11 @@ This is the physical and mission model for the **reference application** of the 
 - [FRAMEWORK.md](../../FRAMEWORK.md) is the framework itself.
 - [DESIGN.md](../../DESIGN.md) is the roadmap. This example is built last.
 
-Status: **draft for review**. Items marked VERIFY must be checked in the named phase.
+Status: **implemented** (B1–B8, `examples/drone_swarm/`). Where the build deliberately differs
+(cylinder obstacles, no IMU/GPS/altimeter plugins, wind outside the physics, 8 m pads), see the
+[README's simplifications](../../../examples/drone_swarm/README.md#simplifications-ponytail).
+VERIFY items: the X3 twist is body-frame (the controller holds yaw at 0 and rotates by yaw); no
+WindEffects (wind drives the energy model and the agents' state).
 
 ---
 

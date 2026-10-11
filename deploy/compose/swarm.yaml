@@ -1,0 +1,98 @@
+# Drone swarm (Part B) on compose: the jev_ai services + Gazebo + 4 drones, one container per node.
+#
+#   docker build -f deploy/docker/Dockerfile -t jev-ai:humble .
+#   docker build -f deploy/docker/Dockerfile.swarm -t jev-ai-swarm:humble .
+#   docker compose -f deploy/compose/swarm.yaml up -d
+#   # Gazebo: http://localhost:6081/vnc.html (password: docker compose logs sim | grep noVNC)
+#   # decisions + swarm status: http://localhost:8080
+#   docker compose -f deploy/compose/swarm.yaml down
+#
+# Keyless by default (swarm.env); live: JEV_BACKEND=typesafe LLM_BACKEND=anthropic with keys in
+# the repo's .env. The mission auto-starts once every drone reports.
+name: jev_ai_swarm
+include:
+  - path: compose.yaml
+    env_file: swarm.env
+
+x-swarm: &swarm
+  image: ${JEV_AI_IMAGE:-jev-ai-swarm:humble}
+  restart: unless-stopped
+  env_file:
+    - path: ../../.env
+      required: false
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  deploy:
+    resources:
+      limits: {cpus: '0.5', memory: 384M}
+
+# Every swarm node gets the episode (num_drones, seed) and sim time; the C++ nodes also read
+# scenario.yaml. To change N, edit num_drones everywhere and add/remove uavK_* services.
+services:
+  sim:                                # Gazebo server + GUI (noVNC) + ros_gz_bridge in one container
+    <<: *swarm
+    command: /gui.sh ros2 launch drone_swarm sim.launch.py num_drones:=4 seed:=0 gui:=${GUI:-true}
+    ports:
+      - "127.0.0.1:${NOVNC_PORT:-6081}:6080"
+    deploy:
+      resources:
+        limits: {cpus: '4', memory: 3G}
+
+  environment:
+    <<: *swarm
+    command: ros2 run drone_swarm environment --ros-args -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  comms_sim:
+    <<: *swarm
+    command: ros2 run swarm_control comms_sim --ros-args --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  formation_planner:
+    <<: *swarm
+    command: ros2 run swarm_control formation_planner
+  mission_coordinator:
+    <<: *swarm
+    command: ros2 run drone_swarm mission_coordinator --ros-args -r __ns:=/coordinator -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  coordinator_llm:                    # the coordinator's own LLM server (Sonnet 5.5, effort medium)
+    <<: *swarm
+    command: ros2 run jev_ai_servers llm_server --ros-args -r __ns:=/coordinator --params-file /ws/install/share/drone_swarm/config/swarm_params.yaml -p backend:=${LLM_BACKEND:-mock}
+  mission_scorer:
+    <<: *swarm
+    command: ros2 run drone_swarm mission_scorer --ros-args -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm} -p summary_path:=/records/episode.json
+    volumes:
+      - records:/records
+
+  # per drone: flight_controller + sensor_sim (C++) + drone_agent (jev_ai), namespace /uavK
+  uav1_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav1 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav1_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav1 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav1_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav1 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav2_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav2 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav2_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav2 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav2_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav2 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav3_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav3 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav3_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav3 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav3_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav3 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav4_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav4 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav4_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav4 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+  uav4_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav4 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}

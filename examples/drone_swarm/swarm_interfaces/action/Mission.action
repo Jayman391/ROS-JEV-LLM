@@ -1,0 +1,13 @@
+# Search & rescue mission for the whole swarm (mission_coordinator).
+float64 t_max_s          # 0 = scenario default
+string objective         # free text for the planner ("" = the standard SAR objective)
+---
+bool success
+string summary
+uint32 confirmed_survivors
+float64 coverage
+---
+string phase             # LAUNCH | TRANSIT | SEARCH | CONFIRM | RECOVER | DONE | ABORT
+float64 elapsed_s
+float64 coverage
+uint32 confirmed

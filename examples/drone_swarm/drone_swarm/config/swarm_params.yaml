@@ -1,0 +1,40 @@
+# Drone swarm overrides of the jev_ai servers (DECISION_MODEL §8). Keys never go here.
+jev_server:                        # shared by every drone and the coordinator
+  ros__parameters:
+    max_rps: 80.0
+    mock:
+      seed: 7
+      first_bias: 0.05
+      latency_s: 0.03
+      rules: drone_swarm.mock_rules:swarm
+
+llm_server:                        # drones: Haiku 5.5, effort low
+  ros__parameters:
+    model: claude-haiku-5-5
+    effort: low
+    timeout_s: 6.0
+    max_rps: 10.0
+    mock:
+      seed: 7
+      disagreement: 0.3
+      latency_s: 0.6
+
+/coordinator/llm_server:           # coordinator: Sonnet 5.5, effort medium (augmentation + plans)
+  ros__parameters:
+    model: claude-sonnet-5-5
+    effort: medium
+    timeout_s: 15.0
+    max_tokens: 2048
+    mock:
+      seed: 11
+      disagreement: 0.25
+      latency_s: 1.5
+
+decision_logger:
+  ros__parameters:
+    path: /tmp/drone_swarm/decisions.jsonl
+
+dashboard:
+  ros__parameters:
+    allowed_hosts: localhost,127.0.0.1,::1
+    max_records: 8000

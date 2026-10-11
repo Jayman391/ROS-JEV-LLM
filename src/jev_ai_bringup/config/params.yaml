@@ -6,7 +6,6 @@ jev_server:
     timeout_s: 1.0
     max_retries: 1
     max_rps: 50.0
-    max_tokens_per_min: 200000.0
     breaker_errors: 5
     breaker_cooldown_s: 30.0
     record_path: ''                # set to record a cassette for the replay backend
@@ -34,7 +33,6 @@ llm_server:
     timeout_s: 6.0                 # = llm_timeout (§14); engines wait T_wait = llm_timeout + 0.5
     max_retries: 1
     max_rps: 10.0
-    max_tokens_per_min: 200000.0
     breaker_errors: 5
     breaker_cooldown_s: 30.0
     record_path: ''

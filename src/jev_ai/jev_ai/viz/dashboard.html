@@ -430,10 +430,13 @@ const LEVEL = [['good', 'OK', '●'], ['warning', 'Warning', '▲'], ['critical'
 function renderHealth() {
   const diags = Object.values((S.data && S.data.diagnostics) || {});
   if (!diags.length) { $('health').innerHTML = ''; return; }
-  $('health').innerHTML = `<h2>Servers</h2><p class="sub">Latest /diagnostics from jev_server and llm_server: circuit breaker, latency and spend over the last hour.</p>
+  const KNOWN = new Set(['backend', 'model', 'breaker', 'latency_ms_p50', 'latency_ms_p95', 'usd_last_hour',
+    'active', 'calls', 'errors', 'last_error', 'tokens_last_min']);   // the servers' card shows these its own way
+  $('health').innerHTML = `<h2>Status</h2><p class="sub">Latest /diagnostics: the jev_ai servers (circuit breaker, latency, spend over the last hour) and anything else the application publishes.</p>
   <div class="grid health">${diags.map((d) => {
     const v = d.values || {}, lv = LEVEL[Math.min(3, Number(d.level) || 0)];
     const spent = parseFloat(v.usd_last_hour);
+    const other = Object.entries(v).filter(([k]) => !KNOWN.has(k));
     return `<div class="panel">
       <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--${lv[0]})" aria-hidden="true">${lv[2]}</span>
         <h3 class="mono">${esc(d.name)}</h3><span class="spacer"></span><span class="badge">${lv[1]}</span></div>
@@ -443,6 +446,7 @@ function renderHealth() {
         ${v.breaker ? `<dt>breaker</dt><dd>${esc(v.breaker.replace('_', '-'))}</dd>` : ''}
         ${v.latency_ms_p50 ? `<dt>latency</dt><dd>p50 ${ms(+v.latency_ms_p50)} · p95 ${ms(+v.latency_ms_p95)}</dd>` : ''}
         ${isFinite(spent) ? `<dt>spend</dt><dd>${usd(spent)} last hour</dd>` : ''}
+        ${other.map(([k, x]) => `<dt>${esc(k)}</dt><dd>${esc(x)}</dd>`).join('')}
       </dl>
     </div>`;
   }).join('')}</div>`;
@@ -672,9 +676,13 @@ function renderFilter() {
   if ($('qs-filter').innerHTML !== html) $('qs-filter').innerHTML = html;
 }
 function render(force) {
+  // re-rendering a section empties it for a moment (charts measure their width mid-render), and the
+  // browser clamps the scroll position meanwhile: put the reader back where they were
+  const y = scrollY;
   renderStatus(); renderFilter();
   if (S.tab === 'live') renderLive();
   else if (force || !S.data || S.metricsStamp !== (S.data.metrics && S.data.metrics.generated_at)) renderMetrics();
+  if (scrollY !== y) scrollTo(0, y);
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
   S.tab = b.dataset.tab;

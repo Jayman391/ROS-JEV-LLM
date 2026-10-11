@@ -35,7 +35,6 @@ PARAMS = {                       # generic parameters (§8, §9, §14); backend 
     'timeout_s': 1.0,
     'max_retries': 1,
     'max_rps': 50.0,
-    'max_tokens_per_min': 200_000.0,
     'breaker_errors': 5,
     'breaker_cooldown_s': 30.0,
     'record_path': '',           # append every successful answer to this cassette (JSONL)
@@ -103,7 +102,7 @@ class BackendServer(LifecycleNode):
             self.last_error = str(e)
             self.backend = None
             return TransitionCallbackReturn.FAILURE
-        self.budget = Budget(self.p('max_rps'), self.p('max_tokens_per_min'))
+        self.budget = Budget(self.p('max_rps'))
         self.breaker = CircuitBreaker(self.p('breaker_errors'), self.p('breaker_cooldown_s'))
         self.setup_endpoint()
         self.get_logger().info(f'configured: backend={name} model={self.p("model") or "default"}')

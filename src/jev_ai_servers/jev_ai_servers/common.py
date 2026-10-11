@@ -21,11 +21,11 @@ def read_key(env: str, key_file: str = '') -> str:
 
 
 class Budget:
-    """Sliding-window limits (§9): requests/s, tokens/min (0 disables a limit). USD/hour is
-    tracked for diagnostics only; there is no spending cap (prototype)."""
+    """Sliding-window request limit (§9): requests/s (0 disables it). Tokens/min and USD/hour are
+    tracked for diagnostics only; there is no token or spending cap (prototype)."""
 
-    def __init__(self, max_rps: float = 50, max_tokens_per_min: float = 200_000):
-        self.max_rps, self.max_tpm = max_rps, max_tokens_per_min
+    def __init__(self, max_rps: float = 50):
+        self.max_rps = max_rps
         self._req: deque[float] = deque()
         self._tok: deque[tuple[float, float]] = deque()
         self._usd: deque[tuple[float, float]] = deque()
@@ -43,8 +43,6 @@ class Budget:
         self._trim(now)
         if self.max_rps and len(self._req) >= self.max_rps:
             return 'budget: max_rps'
-        if self.max_tpm and self.tokens_last_min >= self.max_tpm:
-            return 'budget: max_tokens_per_min'
         self._req.append(now)
         return ''
 

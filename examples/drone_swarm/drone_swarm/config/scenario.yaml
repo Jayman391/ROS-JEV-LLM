@@ -1,0 +1,63 @@
+# Drone swarm scenario (SYSTEM_MODEL §8): one parameter file for every node, C++ and Python.
+# Python reads the same file (drone_swarm.scenario.load). World frame: ENU, metres, base at origin.
+/**:
+  ros__parameters:
+    num_drones: 4
+    seed: 0                       # episode seed: targets, wind, visibility, faults
+    t_max_s: 600.0
+    ao: [20.0, 320.0, -150.0, 150.0]      # x_min, x_max, y_min, y_max
+    pad_spacing: 8.0              # landing spots along y (2·d_sep: neighbours never trip H4)
+    cell_m: 10.0                  # coverage grid
+    num_targets: 10
+    faults: true                  # inject 0-2 faults per episode
+    # static world (fixed per world file): vertical cylinders x, y, radius, height
+    obstacles: [80.0, 60.0, 6.0, 40.0,  150.0, -90.0, 5.0, 35.0,  220.0, 30.0, 8.0, 25.0,
+                270.0, -40.0, 4.0, 45.0,  110.0, -20.0, 5.0, 20.0,  300.0, 110.0, 6.0, 38.0]
+    nfz: [180.0, 100.0, 20.0,  250.0, -110.0, 18.0]     # no-fly cylinders x, y, radius
+    # vehicle (§3)
+    v_max_h: 5.0
+    v_max_up: 2.0
+    v_max_down: 1.5
+    a_max: 2.0
+    yaw_rate_max: 1.0
+    v_survey: 4.0
+    v_transit: 5.0
+    v_inspect: 2.0
+    alt_survey: 30.0
+    alt_transit: 40.0
+    alt_inspect: 10.0
+    alt_min: 5.0
+    alt_max: 60.0
+    # energy (§3.1)
+    E_0: 40.0                     # Wh
+    P_hover: 180.0                # W
+    k_h: 2.0
+    k_c: 25.0
+    k_w: 1.5
+    reserve: 0.10
+    E_land_wh: 0.3
+    # detector (§4.6)
+    det_fov_deg: 60.0
+    det_p0: 0.9
+    det_h_opt: 15.0
+    det_sigma_h: 15.0
+    det_v_blur: 8.0
+    det_lambda_fp: 0.02
+    # comms (§4.8)
+    R_c: 250.0
+    link_slope: 20.0
+    latency_ms: 50.0
+    latency_jitter_ms: 200.0
+    # safety (§7.1)
+    d_sep: 4.0
+    obstacle_clear: 3.0
+    nfz_buffer: 5.0
+    lost_link_hold_s: 10.0
+    lost_link_rtb_s: 30.0
+    # scoring (§6)
+    w_R: 0.40
+    w_P: 0.20
+    w_C: 0.20
+    w_T: 0.10
+    w_E: 0.10
+    w_usd: 10.0

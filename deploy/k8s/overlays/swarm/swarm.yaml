@@ -1,0 +1,152 @@
+# Drone swarm workloads. $(VAR) expands from jev-ai-env. Every swarm node runs on sim time.
+# The sim pod holds Gazebo + ros_gz_bridge (+ GUI on noVNC): ign-transport stays inside one pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sim
+spec:
+  selector: {matchLabels: {app: sim}}
+  template:
+    metadata: {labels: {app: sim}}
+    spec:
+      containers:
+        - name: sim
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [/gui.sh, ros2, launch, drone_swarm, sim.launch.py, "num_drones:=$(NUM_DRONES)",
+                 "seed:=$(SEED)", "gui:=true"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+          ports: [{containerPort: 6080, name: novnc}]
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {cpu: "4", memory: 3Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sim
+spec:
+  selector: {app: sim}
+  ports: [{port: 6080, targetPort: novnc, name: novnc}]
+---
+# world nodes: environment (ground truth), comms_sim, formation_planner, mission_scorer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: world
+spec:
+  selector: {matchLabels: {app: world}}
+  template:
+    metadata: {labels: {app: world}}
+    spec:
+      containers:
+        - name: environment
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, drone_swarm, environment, --ros-args, -p, "num_drones:=$(NUM_DRONES)",
+                 -p, "seed:=$(SEED)", -p, use_sim_time:=true]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 20m, memory: 96Mi}, limits: {cpu: 300m, memory: 256Mi}}
+        - name: comms-sim
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, swarm_control, comms_sim, --ros-args, --params-file, $(SCENARIO),
+                 -p, "num_drones:=$(NUM_DRONES)", -p, "seed:=$(SEED)", -p, use_sim_time:=true]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {cpu: 300m, memory: 256Mi}}
+        - name: formation-planner
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, swarm_control, formation_planner]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi}}
+        - name: mission-scorer
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, drone_swarm, mission_scorer, --ros-args, -p, "num_drones:=$(NUM_DRONES)",
+                 -p, "seed:=$(SEED)", -p, use_sim_time:=true, -p, "run_id:=$(RUN_ID)",
+                 -p, "summary_path:=/records/episode.json"]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          volumeMounts: [{name: records, mountPath: /records}]
+          resources: {requests: {cpu: 20m, memory: 96Mi}, limits: {cpu: 300m, memory: 256Mi}}
+      volumes: [{name: records, persistentVolumeClaim: {claimName: jev-ai-records}}]
+---
+# the supervisor: mission_coordinator + its own LLM server (Sonnet 5.5, effort medium)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coordinator
+spec:
+  selector: {matchLabels: {app: coordinator}}
+  template:
+    metadata: {labels: {app: coordinator}}
+    spec:
+      containers:
+        - name: mission-coordinator
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, drone_swarm, mission_coordinator, --ros-args, -r, __ns:=/coordinator,
+                 -r, decisions:=/decisions, -p, "num_drones:=$(NUM_DRONES)", -p, "seed:=$(SEED)",
+                 -p, use_sim_time:=true, -p, "run_id:=$(RUN_ID)"]
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 384Mi}}
+        - name: coordinator-llm
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          args: [ros2, run, jev_ai_servers, llm_server, --ros-args, -r, __ns:=/coordinator,
+                 --params-file, $(PARAMS_FILE), -p, "backend:=$(LLM_BACKEND)"]
+          envFrom:
+            - configMapRef: {name: jev-ai-env}
+            - secretRef: {name: jev-ai-keys, optional: true}
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 512Mi}}
+---
+# One pod per drone: pod uav-K is drone uav{K+1} (namespace /uav{K+1}); three containers, one per
+# node (flight_controller, sensor_sim, drone_agent). Scale with `replicas:` in kustomization.yaml
+# together with NUM_DRONES (the world has that many X3s).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: uav
+spec:
+  serviceName: uav
+  replicas: 4
+  podManagementPolicy: Parallel
+  selector: {matchLabels: {app: uav}}
+  template:
+    metadata: {labels: {app: uav}}
+    spec:
+      containers:
+        - name: flight-controller
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          command: [/entrypoint.sh, bash, -c]
+          args:
+            - >-
+              exec ros2 run swarm_control flight_controller --ros-args
+              -r __ns:=/uav$(( ${HOSTNAME##*-} + 1 )) --params-file $SCENARIO
+              -p num_drones:=$NUM_DRONES -p seed:=$SEED -p use_sim_time:=true
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 30m, memory: 64Mi}, limits: {cpu: 300m, memory: 192Mi}}
+        - name: sensor-sim
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          command: [/entrypoint.sh, bash, -c]
+          args:
+            - >-
+              exec ros2 run swarm_control sensor_sim --ros-args
+              -r __ns:=/uav$(( ${HOSTNAME##*-} + 1 )) --params-file $SCENARIO
+              -p num_drones:=$NUM_DRONES -p seed:=$SEED -p use_sim_time:=true
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 30m, memory: 64Mi}, limits: {cpu: 300m, memory: 192Mi}}
+        - name: drone-agent
+          image: jev-ai
+          imagePullPolicy: IfNotPresent
+          command: [/entrypoint.sh, bash, -c]
+          args:
+            - >-
+              exec ros2 run drone_swarm drone_agent --ros-args
+              -r __ns:=/uav$(( ${HOSTNAME##*-} + 1 )) -r decisions:=/decisions
+              -p num_drones:=$NUM_DRONES -p seed:=$SEED -p use_sim_time:=true -p run_id:=$RUN_ID
+          envFrom: [{configMapRef: {name: jev-ai-env}}]
+          resources: {requests: {cpu: 50m, memory: 128Mi}, limits: {cpu: 500m, memory: 384Mi}}

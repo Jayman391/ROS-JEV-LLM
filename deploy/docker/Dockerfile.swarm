@@ -1,0 +1,29 @@
+# Drone swarm image (Part B): the jev_ai runtime image + Gazebo Fortress, ros_gz and the example
+# packages, plus Xvfb/noVNC so the sim container can show the Gazebo GUI in a browser.
+# Humble only: Fortress is the Gazebo paired with Humble.
+#
+#   docker build -f deploy/docker/Dockerfile -t jev-ai:humble .
+#   docker build -f deploy/docker/Dockerfile.swarm -t jev-ai-swarm:humble .
+ARG BASE=jev-ai:humble
+FROM ${BASE}
+SHELL ["/bin/bash", "-c"]
+
+# Gazebo (OSRF) apt repo: the Fortress libraries ros-humble-ros-gz is built against
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg lsb-release \
+    && curl -sSL https://packages.osrfoundation.org/gazebo.gpg \
+        -o /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" \
+        > /etc/apt/sources.list.d/gazebo-stable.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-ros-gz xvfb x11vnc novnc websockify libgl1-mesa-dri openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY examples/drone_swarm/ examples/drone_swarm/
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && source /ws/install/setup.bash \
+    && colcon build --merge-install --base-paths examples \
+        --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    && rm -rf build log
+
+# the dev image's virtual display + noVNC (http://<host>:6080/vnc.html); used by the sim container
+COPY docker/entrypoint.sh /gui.sh
+ENV LIBGL_ALWAYS_SOFTWARE=1

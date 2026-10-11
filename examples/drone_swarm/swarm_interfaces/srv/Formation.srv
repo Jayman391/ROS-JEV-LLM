@@ -1,0 +1,10 @@
+# Formation slots around a leader point, assigned to drones by Hungarian on squared distance.
+string shape                       # column | line | v | diamond | circle
+float64 spacing                    # m between neighbouring slots
+geometry_msgs/Point centre         # the leader point (z = altitude)
+float64 heading                    # rad, direction of travel (ENU, 0 = +x)
+geometry_msgs/Point[] positions    # current drone positions
+---
+bool success
+string message
+geometry_msgs/Point[] slots        # one per drone, in the order of positions
