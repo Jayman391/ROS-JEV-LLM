@@ -1,4 +1,4 @@
-# Drone swarm (Part B) on compose: the jev_ai services + Gazebo + 4 drones, one container per node.
+# Drone swarm (Part B) on compose: the jev_ai services + Gazebo + 8 drones, one container per node.
 #
 #   docker build -f deploy/docker/Dockerfile -t jev-ai:humble .
 #   docker build -f deploy/docker/Dockerfile.swarm -t jev-ai-swarm:humble .
@@ -26,12 +26,12 @@ x-swarm: &swarm
     resources:
       limits: {cpus: '0.5', memory: 384M}
 
-# Every swarm node gets the episode (num_drones, seed) and sim time; the C++ nodes also read
-# scenario.yaml. To change N, edit num_drones everywhere and add/remove uavK_* services.
+# Every swarm node gets the episode seed and sim time; num_drones comes from scenario.yaml.
+# To change N, edit num_drones there and add/remove uavK_* services.
 services:
   sim:                                # Gazebo server + GUI (noVNC) + ros_gz_bridge in one container
     <<: *swarm
-    command: /gui.sh ros2 launch drone_swarm sim.launch.py num_drones:=4 seed:=0 gui:=${GUI:-true}
+    command: /gui.sh ros2 launch drone_swarm sim.launch.py seed:=0 gui:=${GUI:-true}
     ports:
       - "127.0.0.1:${NOVNC_PORT:-6081}:6080"
     deploy:
@@ -40,59 +40,95 @@ services:
 
   environment:
     <<: *swarm
-    command: ros2 run drone_swarm environment --ros-args -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run drone_swarm environment --ros-args -p seed:=0 -p use_sim_time:=true
   comms_sim:
     <<: *swarm
-    command: ros2 run swarm_control comms_sim --ros-args --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control comms_sim --ros-args --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   formation_planner:
     <<: *swarm
     command: ros2 run swarm_control formation_planner
   mission_coordinator:
     <<: *swarm
-    command: ros2 run drone_swarm mission_coordinator --ros-args -r __ns:=/coordinator -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+    command: ros2 run drone_swarm mission_coordinator --ros-args -r __ns:=/coordinator -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
   coordinator_llm:                    # the coordinator's own LLM server (Sonnet 5.5, effort medium)
     <<: *swarm
     command: ros2 run jev_ai_servers llm_server --ros-args -r __ns:=/coordinator --params-file /ws/install/share/drone_swarm/config/swarm_params.yaml -p backend:=${LLM_BACKEND:-mock}
   mission_scorer:
     <<: *swarm
-    command: ros2 run drone_swarm mission_scorer --ros-args -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm} -p summary_path:=/records/episode.json
+    command: ros2 run drone_swarm mission_scorer --ros-args -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm} -p summary_path:=/records/episode.json
     volumes:
       - records:/records
 
   # per drone: flight_controller + sensor_sim (C++) + drone_agent (jev_ai), namespace /uavK
   uav1_fc:
     <<: *swarm
-    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav1 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav1 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav1_sensors:
     <<: *swarm
-    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav1 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav1 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav1_agent:
     <<: *swarm
-    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav1 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav1 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
   uav2_fc:
     <<: *swarm
-    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav2 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav2 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav2_sensors:
     <<: *swarm
-    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav2 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav2 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav2_agent:
     <<: *swarm
-    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav2 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav2 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
   uav3_fc:
     <<: *swarm
-    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav3 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav3 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav3_sensors:
     <<: *swarm
-    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav3 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav3 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav3_agent:
     <<: *swarm
-    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav3 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav3 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
   uav4_fc:
     <<: *swarm
-    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav4 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav4 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav4_sensors:
     <<: *swarm
-    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav4 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p num_drones:=4 -p seed:=0 -p use_sim_time:=true
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav4 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
   uav4_agent:
     <<: *swarm
-    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav4 -r decisions:=/decisions -p num_drones:=4 -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav4 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav5_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav5 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav5_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav5 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav5_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav5 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav6_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav6 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav6_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav6 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav6_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav6 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav7_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav7 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav7_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav7 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav7_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav7 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}
+  uav8_fc:
+    <<: *swarm
+    command: ros2 run swarm_control flight_controller --ros-args -r __ns:=/uav8 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav8_sensors:
+    <<: *swarm
+    command: ros2 run swarm_control sensor_sim --ros-args -r __ns:=/uav8 --params-file /ws/install/share/drone_swarm/config/scenario.yaml -p seed:=0 -p use_sim_time:=true
+  uav8_agent:
+    <<: *swarm
+    command: ros2 run drone_swarm drone_agent --ros-args -r __ns:=/uav8 -r decisions:=/decisions -p seed:=0 -p use_sim_time:=true -p run_id:=${RUN_ID:-swarm}

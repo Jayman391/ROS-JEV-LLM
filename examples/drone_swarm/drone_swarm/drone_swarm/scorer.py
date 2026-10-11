@@ -143,6 +143,9 @@ class Scorer(Node):
                     (sb.position.x, sb.position.y, sb.position.z)) < self.p['d_sep']
                 if close and (a, b) not in self.close:
                     self.pen['separation'] += 1
+                    self.get_logger().warn(
+                        f'separation breach {a}-{b} at ({sa.position.x:.0f}, '
+                        f'{sa.position.y:.0f}, {sa.position.z:.0f}): {sa.task} / {sb.task}')
                 (self.close.add if close else self.close.discard)((a, b))
 
     def score(self) -> dict:

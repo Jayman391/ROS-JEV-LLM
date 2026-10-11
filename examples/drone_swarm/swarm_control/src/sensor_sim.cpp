@@ -87,9 +87,12 @@ public:
     det_pub_ = create_publisher<DetectionArray>("detections", 10);
     link_pub_ = create_publisher<swarm_interfaces::msg::LinkStatus>("link", 10);
     fault_pub_ = create_publisher<std_msgs::msg::String>("faults", 10);
-    timers_.push_back(create_wall_timer(std::chrono::milliseconds(100), [this] {fast();}));
-    timers_.push_back(create_wall_timer(std::chrono::milliseconds(500), [this] {detect();}));
-    timers_.push_back(create_wall_timer(std::chrono::seconds(1), [this] {slow();}));
+    // sim-time timers: a detection frame every 0.5 sim s at any real-time factor
+    using std::chrono::milliseconds;
+    auto clock = get_clock();
+    timers_.push_back(rclcpp::create_timer(this, clock, milliseconds(100), [this] {fast();}));
+    timers_.push_back(rclcpp::create_timer(this, clock, milliseconds(500), [this] {detect();}));
+    timers_.push_back(rclcpp::create_timer(this, clock, milliseconds(1000), [this] {slow();}));
   }
 
 private:

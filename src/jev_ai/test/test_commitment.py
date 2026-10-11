@@ -123,6 +123,17 @@ def test_forced_and_skip(raw, qset):
     assert (s.phase, s.final, s.act, s.request_llm) == (COMMITTED, True, True, '')
 
 
+def test_per_question_skip_gates_only_that_question(raw):
+    """skip_llm_above_c on next_action alone: the always-uncertain yes/no report_now can't keep
+    the LLM firing."""
+    raw['question_sets']['next_step']['questions']['next_action']['skip_llm_above_c'] = 0.5
+    qs = load_catalog(raw).question_sets['next_step']
+    s = machine(qs).on_event(0.0, state=STATE, p_jev=P([0.98, 0.01, 0.01], report=(0.5, 0.5)))
+    assert (s.phase, s.request_llm) == (COMMITTED, '')              # next_action c = 0.90
+    s = machine(qs).on_event(0.0, state=STATE, p_jev=P([0.6, 0.3, 0.1]))
+    assert s.phase == PROVISIONAL and s.request_llm                  # next_action c = 0.18
+
+
 def test_dwell_blocks_voluntary_switch_not_mask_forced(qset):
     m = machine(qset)
     m.on_event(0.0, state=STATE, p_jev=P(FAR), required={'next_action': 'inspect'})

@@ -23,6 +23,7 @@ question_sets:
           - {name: request_support, criteria: "Keep working but ask the coordinator for help or a handoff.", reversible: true}
           - {name: land_now, criteria: "Emergency landing in place; only for a critical failure.", reversible: false}
         fallback: continue
+        skip_llm_above_c: 0.7        # Haiku only when Jev's action choice is uncertain (live: ~11%)
         tau: 0.5
         kappa: 0.7
         coupling: 0.5
@@ -82,5 +83,6 @@ policy:
   T_dwell: 3.0
   T_refresh: 20.0
   k_max: 6                       # augmentations/min per drone (DECISION_MODEL §6)
-  llm_timeout: 6.0
+  llm_timeout: 6.0               # wall s
+  T_wait: 12.5                   # sim s: llm_timeout x scenario real_time_factor (2) + 0.5
   epoch_s: 5.0

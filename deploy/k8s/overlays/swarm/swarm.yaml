@@ -110,7 +110,7 @@ metadata:
   name: uav
 spec:
   serviceName: uav
-  replicas: 4
+  replicas: 8
   podManagementPolicy: Parallel
   selector: {matchLabels: {app: uav}}
   template:

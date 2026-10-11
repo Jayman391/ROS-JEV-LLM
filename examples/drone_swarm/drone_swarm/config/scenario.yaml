@@ -2,18 +2,29 @@
 # Python reads the same file (drone_swarm.scenario.load). World frame: ENU, metres, base at origin.
 /**:
   ros__parameters:
-    num_drones: 4
+    num_drones: 8
     seed: 0                       # episode seed: targets, wind, visibility, faults
-    t_max_s: 600.0
-    ao: [20.0, 320.0, -150.0, 150.0]      # x_min, x_max, y_min, y_max
+    t_max_s: 900.0                # sim s (survey ~420 s + transit, confirm, recover)
+    real_time_factor: 2.0         # sim s per wall s; LLM latency is wall time (see catalogs' T_wait)
+    # Gazebo publishes /clock every step and every rclpy node pays for each message: 4 ms reached
+    # only 1.6-1.8x with 8 drones (/clock 430 Hz wall); 8 ms holds 2.0x, flight unchanged
+    # (TRANSIT 35 s, no separation breaches)
+    physics_step_s: 0.008
+    # 8 strips of 72 m = 4 lanes at alt_survey 20 m (lane_spacing 18.5 m)
+    ao: [20.0, 420.0, -288.0, 288.0]      # x_min, x_max, y_min, y_max
     pad_spacing: 8.0              # landing spots along y (2·d_sep: neighbours never trip H4)
     cell_m: 10.0                  # coverage grid
-    num_targets: 10
+    num_targets: 24               # same density as 10 in 300x300 m
+    num_survivors: 8
+    wind_max: 4.0                 # m/s; episode wind is uniform in [0, wind_max]
     faults: true                  # inject 0-2 faults per episode
     # static world (fixed per world file): vertical cylinders x, y, radius, height
-    obstacles: [80.0, 60.0, 6.0, 40.0,  150.0, -90.0, 5.0, 35.0,  220.0, 30.0, 8.0, 25.0,
-                270.0, -40.0, 4.0, 45.0,  110.0, -20.0, 5.0, 20.0,  300.0, 110.0, 6.0, 38.0]
-    nfz: [180.0, 100.0, 20.0,  250.0, -110.0, 18.0]     # no-fly cylinders x, y, radius
+    obstacles: [100.0, 115.0, 6.0, 40.0,  193.0, -173.0, 5.0, 35.0,  287.0, 58.0, 8.0, 25.0,
+                353.0, -77.0, 4.0, 45.0,  140.0, -38.0, 5.0, 20.0,  393.0, 211.0, 6.0, 38.0,
+                90.0, -240.0, 5.0, 30.0,  170.0, 250.0, 6.0, 40.0,  240.0, -260.0, 5.0, 35.0,
+                210.0, 140.0, 7.0, 30.0,  330.0, -150.0, 6.0, 42.0,  380.0, -260.0, 4.0, 28.0,
+                60.0, 220.0, 5.0, 25.0,  260.0, -120.0, 5.0, 32.0]
+    nfz: [233.0, 192.0, 20.0,  313.0, -211.0, 18.0,  110.0, -150.0, 18.0,  340.0, 30.0, 20.0]
     # vehicle (§3)
     v_max_h: 5.0
     v_max_up: 2.0
@@ -23,13 +34,13 @@
     v_survey: 4.0
     v_transit: 5.0
     v_inspect: 2.0
-    alt_survey: 30.0
+    alt_survey: 20.0              # fixed (not in the LLM plan): p_detect 0.52/pass vs 0.33 at 30 m
     alt_transit: 40.0
     alt_inspect: 10.0
     alt_min: 5.0
     alt_max: 60.0
     # energy (§3.1)
-    E_0: 40.0                     # Wh
+    E_0: 60.0                     # Wh (~915 s at survey speed)
     P_hover: 180.0                # W
     k_h: 2.0
     k_c: 25.0

@@ -7,7 +7,7 @@
 #   kubectl -n jev-ai logs deploy/sim | grep noVNC         # its password
 #   kubectl delete -k deploy/k8s/overlays/swarm
 #
-# 6 drones: set NUM_DRONES=6 below and `replicas: 6` (the `replicas:` block), then apply again
+# Other N: set NUM_DRONES=N below and `replicas: N` (the `replicas:` block), then apply again
 # (the sim pod regenerates the world for N; the mission restarts).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -22,12 +22,12 @@ configMapGenerator:
       - LLM_BACKEND=mock
       - PARAMS_FILE=/ws/install/share/drone_swarm/config/swarm_params.yaml
       - RUN_ID=swarm-k8s
-      - NUM_DRONES=4
+      - NUM_DRONES=8
       - SEED=0
       - SCENARIO=/ws/install/share/drone_swarm/config/scenario.yaml
 replicas:
   - name: uav
-    count: 4
+    count: 8
 images:
   - name: jev-ai                     # every pod: jev_server imports the swarm's mock rules
     newName: jev-ai-swarm

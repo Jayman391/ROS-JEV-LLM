@@ -21,8 +21,9 @@ SCENARIO = get_package_share_directory('drone_swarm') + '/config/scenario.yaml'
 
 
 def sim(context):
-    n, seed = int(Arg('num_drones').perform(context)), int(Arg('seed').perform(context))
-    p = scenario.load(SCENARIO, num_drones=n, seed=seed)
+    n, seed = Arg('num_drones').perform(context), int(Arg('seed').perform(context))
+    p = scenario.load(SCENARIO, num_drones=int(n) if n else None, seed=seed)
+    n = int(p['num_drones'])
     out = Path(Arg('out_dir').perform(context))
     out.mkdir(parents=True, exist_ok=True)
     world = out / f'world_n{n}_s{seed}.sdf'
@@ -41,7 +42,7 @@ def sim(context):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('num_drones', default_value='4'),
+        DeclareLaunchArgument('num_drones', default_value='', description='"" = scenario'),
         DeclareLaunchArgument('seed', default_value='0'),
         DeclareLaunchArgument('gui', default_value='false'),
         DeclareLaunchArgument('out_dir', default_value='/tmp/drone_swarm'),

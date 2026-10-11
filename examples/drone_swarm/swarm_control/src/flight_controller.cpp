@@ -117,9 +117,12 @@ public:
       [](std::shared_ptr<GoalHandle>) {return rclcpp_action::CancelResponse::ACCEPT;},
       [this](std::shared_ptr<GoalHandle> gh) {start(gh->get_goal()->primitive, *gh->get_goal(), gh);});
 
-    timer_ = create_wall_timer(std::chrono::milliseconds(20), [this] {step();});
-    // the policy runs on sim time: the 50 Hz loop skips when the sim clock has not advanced
-    status_timer_ = create_wall_timer(std::chrono::milliseconds(200), [this] {publish_status();});
+    // sim-time timers: 50 Hz control and 5 Hz status per *sim* second at any real-time factor
+    // (wall timers halved both at 2x, and the separation reflex saw stale peers)
+    timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(20),
+        [this] {step();});
+    status_timer_ = rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(200),
+        [this] {publish_status();});
     RCLCPP_INFO(get_logger(), "%s flight controller ready (home %.1f, %.1f)", name_.c_str(),
       home_.x, home_.y);
   }

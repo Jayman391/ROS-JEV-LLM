@@ -23,8 +23,9 @@ ACTS = {
 DEFAULT_ACT = {NOUL: 'threshold', CHOICE: 'sample', SCORE: 'sample'}
 # Policy fields a single question may override in the catalog.
 # beta_min..eta come from `ros2 jev calibrate`, which fits them per question (§12).
+# skip_llm_above_c per question: only the questions that set it gate augmentation (§5.2 step 6).
 QUESTION_OVERRIDES = {'tau', 'kappa', 'coupling', 'coupling_directive', 'argmax_margin', 'm_irrev',
-                      'beta_min', 'beta_max', 'gamma', 'B', 'eta'}
+                      'beta_min', 'beta_max', 'gamma', 'B', 'eta', 'skip_llm_above_c'}
 
 
 class CatalogError(ValueError):

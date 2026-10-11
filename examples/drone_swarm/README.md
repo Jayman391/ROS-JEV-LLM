@@ -18,11 +18,17 @@ ros2 launch drone_swarm swarm.launch.py gui:=true      # keyless mocks; mission 
 #   Gazebo:                 http://localhost:6080/vnc.html  (run `gui-fullscreen` to maximise)
 #   decisions + swarm:      http://localhost:8080
 ros2 launch drone_swarm swarm.launch.py gui:=true jev_backend:=typesafe llm_backend:=anthropic
-ros2 launch drone_swarm swarm.launch.py num_drones:=6 seed:=3 t_max_s:=900
+ros2 launch drone_swarm swarm.launch.py seed:=3 t_max_s:=1200
 ```
 
+Defaults (`config/scenario.yaml`): 8 drones over 400 × 576 m (one 72 m strip each = 4 survey lanes
+at the fixed 20 m survey altitude), 8 survivors among 24 targets, 60 Wh batteries, wind ≤ 4 m/s, a
+900 s mission clock at 2× real time (~7.5 min wall). Drones ask Haiku only when Jev's
+`next_action` confidence is below 0.7; the coordinator asks Sonnet on every plan and global
+decision, and on track and report decisions below 0.3 (and on every confirmation).
+
 `auto_start:=false` waits for a goal instead:
-`ros2 action send_goal --feedback /coordinator/mission swarm_interfaces/action/Mission "{t_max_s: 600}"`.
+`ros2 action send_goal --feedback /coordinator/mission swarm_interfaces/action/Mission "{t_max_s: 900}"`.
 
 Watch it from the command line: `ros2 topic echo /coordinator/phase`, `/coordinator/tracks`,
 `/swarm/status`, `ros2 jev status`. The episode's score is logged by `mission_scorer` and written to

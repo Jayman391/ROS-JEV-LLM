@@ -60,8 +60,11 @@ public:
         }
       }));
     diag_pub_ = create_publisher<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10);
-    timers_.push_back(create_wall_timer(std::chrono::milliseconds(20), [this] {deliver();}));
-    timers_.push_back(create_wall_timer(std::chrono::seconds(1), [this] {diagnose();}));
+    // sim time, like the latency it simulates
+    timers_.push_back(rclcpp::create_timer(this, get_clock(), std::chrono::milliseconds(20),
+        [this] {deliver();}));
+    timers_.push_back(rclcpp::create_timer(this, get_clock(), std::chrono::seconds(1),
+        [this] {diagnose();}));
   }
 
 private:

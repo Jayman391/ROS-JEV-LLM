@@ -23,7 +23,8 @@ def test_episode_is_seeded_and_valid():
     a, b, c = scenario.episode(p, 3), scenario.episode(p, 3), scenario.episode(p, 4)
     assert a == b and a != c                                    # same seed = same world (CRN)
     kinds = [k for _, k, _, _ in a['targets']]
-    assert len(kinds) >= p['num_targets'] - 1 and 3 <= kinds.count('survivor') <= 5
+    assert len(kinds) >= p['num_targets'] - 1 and kinds.count('survivor') == p['num_survivors']
+    assert math.hypot(*a['wind']) <= p['wind_max']
     x0, x1, y0, y1 = p['ao']
     for _, _, x, y in a['targets']:
         assert x0 < x < x1 and y0 < y < y1
@@ -50,8 +51,12 @@ def test_coverage_and_energy():
     cov.see(200, 0, 50, 4)                                      # too high: nothing
     cov.see(200, 0, 30, 9)                                      # too fast: nothing
     assert seen > 5 and len(cov.covered) == seen
-    s = scenario.sectors(p)[0]
-    assert scenario.survey_wh(p, s, (0, 0)) < p['E_0']          # one sector fits in a battery
+    # every sector, out and home in the worst wind, fits in the battery above the reserve
+    usable = p['E_0'] * (1 - p['reserve'])
+    for wind in ((p['wind_max'], 0), (-p['wind_max'], 0), (0, p['wind_max'])):
+        for s in scenario.sectors(p):
+            back = scenario.leg_wh(p, (s[2], (s[1] + s[3]) / 2), (0, 0), wind)
+            assert scenario.survey_wh(p, s, (0, 0), wind) + back < usable
     assert abs(scenario.link_q(p, p['R_c']) - 0.5) < 1e-9
 
 
@@ -85,10 +90,13 @@ def test_order_ack_tells_formation_slots_apart():
     assert Coordinator.expect('takeoff', {}) == 'launch'
 
 
-def test_plan_facts_detection_tradeoff():
-    """The numbers the plan prompt gives Sonnet: higher = wider swath, far fewer sightings."""
-    p = scenario.load(str(CONFIG / 'scenario.yaml'))
-    pd = {h: scenario.p_detect(p, h, p['v_survey']) for h in (20, 30, 40)}
-    assert 0.5 < pd[20] < 0.55 and 0.3 < pd[30] < 0.35 and 0.12 < pd[40] < 0.15
-    sw = [scenario.lane_spacing(p, h) for h in (20, 30, 40)]
-    assert sw == sorted(sw)
+def test_plan_cannot_change_survey_altitude():
+    """Survey altitude is the scenario's (20 m), whatever the LLM plan says."""
+    p = params()
+    raw = {'survey_altitude_m': 40, 'transit_formation': 'v', 'formation_spacing_m': 8,
+           'search_end_frac': 0.7, 'recover_frac': 0.85, 'priority_sectors': ['A', 'Z']}
+    plan = Coordinator.validate_plan(SimpleNamespace(p=p, snames=['A', 'B']), raw)
+    assert plan['survey_altitude_m'] == p['alt_survey'] == 20 and plan['priority_sectors'] == ['A']
+    assert 0.5 < scenario.p_detect(p, 20, p['v_survey']) < 0.55
+    w = scenario.sectors(p)[0]
+    assert (w[3] - w[1]) / scenario.lane_spacing(p) <= 4             # 4 whole lanes per strip

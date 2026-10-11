@@ -354,7 +354,7 @@ For each question set, on a tick or a trigger. Each set runs serially in its own
 3. **Masks:** `mask()` and `require()` are evaluated *fresh*, now and again before every act (A4).
 4. **Fuse:** fuse with the cached LLM preference q_L (§6) if its `state_hash` and `mask_hash` match. Otherwise only the age-decayed q_L is used, and only when `reuse_stale_llm` is true (default false).
 5. **Select:** select per §6.3 and §6.4, then commit per §5.3, then call `on_decision`.
-6. **Augment:** if an augmentation trigger fired, the budget allows it and `c < skip_llm_above_c` (default off: always augment), send an async `Reason` goal tagged `(decision_id, g, state_hash, mask_hash)`.
+6. **Augment:** if an augmentation trigger fired, the budget allows it and some gated question has `c < skip_llm_above_c` (default off: always augment), send an async `Reason` goal tagged `(decision_id, g, state_hash, mask_hash)`. Gated questions are those with a `skip_llm_above_c`: set it in `policy:` to gate on every question, or on single questions (e.g. only the acting one; yes/no and score questions are rarely confident, so a set-wide gate seldom skips). An irreversible pending choice always asks.
 7. **Revise:** when the LLM result arrives, discard it if g has advanced, or if the masks recomputed now differ from the tagged hash. Otherwise re-fuse with the **same noise** and run the commitment machine.
 8. **Record:** publish a `DecisionRecord` at every phase transition.
 

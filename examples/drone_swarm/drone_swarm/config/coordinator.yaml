@@ -68,6 +68,7 @@ question_sets:
           - {name: request_inspection, criteria: "Send a drone down to look closely.", reversible: true}
           - {name: dismiss, criteria: "A false alarm; stop tracking it.", reversible: true}
         fallback: await_data
+        skip_llm_above_c: 0.3        # Sonnet only on uncertain verdicts; confirmations always ask
         tau: 0.3
     llm:
       system: "You are {agent}, the mission coordinator of a search-and-rescue drone swarm, judging one detection track. Confirm only with low-altitude evidence; a missed survivor is far worse than an extra inspection."
@@ -87,6 +88,7 @@ question_sets:
           - {name: recall_drone, criteria: "Bring the sender home.", reversible: true}
           - {name: replan, criteria: "Redo the mission plan.", reversible: true}
         fallback: acknowledge
+        skip_llm_above_c: 0.3
         tau: 0.5
     llm:
       system: "You are {agent}, the mission coordinator of a search-and-rescue drone swarm, answering one drone's report."
@@ -94,4 +96,5 @@ policy:
   T_dwell: 1.0                   # per-item sets switch items quickly
   T_refresh: 30.0
   k_max: 4                       # augmentations/min (DECISION_MODEL §6)
-  llm_timeout: 15.0
+  llm_timeout: 15.0              # wall s
+  T_wait: 30.5                   # sim s: llm_timeout x scenario real_time_factor (2) + 0.5

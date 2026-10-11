@@ -198,7 +198,12 @@ class Commitment:
             return self._emit(now, FORCED, traces, final=True, act=True, **meta)
         if degraded:
             return self._emit(now, FALLBACK, traces, final=True, act=True, **meta)
-        skip = self.pol.skip_llm_above_c is not None and min_c >= self.pol.skip_llm_above_c
+        # skip the LLM when every gated question (skip_llm_above_c set) is confident enough;
+        # a set-wide value gates on all questions, a per-question one only on that question
+        gate = {qn: q.policy.skip_llm_above_c for qn, q in questions.items()
+                if q.policy.skip_llm_above_c is not None}
+        skip = bool(gate) and all(traces[qn].jev_confidence >= c for qn, c in gate.items()
+                                  if traces[qn].p_jev)
         if not pending and (not self.qs.augment or skip):
             return self._emit(now, COMMITTED, traces, final=True, act=True, **meta)
 

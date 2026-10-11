@@ -99,7 +99,7 @@ W2 and W3 are dropped from the set when `detection = none`.
 
 | Param | Range |
 |---|---|
-| `survey_altitude_m` | [20, 40] |
+| `survey_altitude_m` | not planned: fixed at `alt_survey` (20 m) |
 | `formation_spacing_m` | [4, 12] |
 | `relay_point` | inside the AO, on the base→sector line |
 

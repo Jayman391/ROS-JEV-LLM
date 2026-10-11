@@ -3,7 +3,7 @@
     ros2 launch drone_swarm swarm.launch.py                          # keyless mocks, headless
     ros2 launch drone_swarm swarm.launch.py gui:=true                # Gazebo at :6080/vnc.html
     ros2 launch drone_swarm swarm.launch.py jev_backend:=typesafe llm_backend:=anthropic
-    ros2 launch drone_swarm swarm.launch.py num_drones:=6 seed:=3 t_max_s:=900
+    ros2 launch drone_swarm swarm.launch.py num_drones:=6 seed:=3 t_max_s:=1200
     # decisions + swarm status: http://localhost:8080      mission: auto-starts (auto_start:=false
     # and `ros2 action send_goal /coordinator/mission swarm_interfaces/action/Mission {}` instead)
 
@@ -37,9 +37,10 @@ def swarm(context):
     keys = ('num_drones', 'seed', 't_max_s', 'out_dir', 'gui', 'run_id', 'jev_backend',
             'llm_backend', 'auto_start', 'dashboard_port', 'drone_catalog', 'coordinator_catalog')
     a = {k: Arg(k).perform(context) for k in keys}
-    n, seed = int(a['num_drones']), int(a['seed'])
-    p = scenario.load(SCENARIO, num_drones=n, seed=seed,
-                      t_max_s=float(a['t_max_s']) if a['t_max_s'] else None)
+    seed = int(a['seed'])
+    p = scenario.load(SCENARIO, num_drones=int(a['num_drones']) if a['num_drones'] else None,
+                      seed=seed, t_max_s=float(a['t_max_s']) if a['t_max_s'] else None)
+    n = int(p['num_drones'])
     run_id = a['run_id'] or f'swarm-s{seed}-{uuid.uuid4().hex[:6]}'
     out = Path(a['out_dir'])
     out.mkdir(parents=True, exist_ok=True)
@@ -86,9 +87,9 @@ def swarm(context):
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('num_drones', default_value='4'),
+        DeclareLaunchArgument('num_drones', default_value='', description='"" = scenario (8)'),
         DeclareLaunchArgument('seed', default_value='0', description='episode seed'),
-        DeclareLaunchArgument('t_max_s', default_value='', description='"" = scenario (600)'),
+        DeclareLaunchArgument('t_max_s', default_value='', description='"" = scenario (900)'),
         DeclareLaunchArgument('gui', default_value='false',
                               description='Gazebo GUI (needs a display: noVNC in the dev image)'),
         DeclareLaunchArgument('jev_backend', default_value='mock',

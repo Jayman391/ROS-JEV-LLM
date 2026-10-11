@@ -46,15 +46,14 @@ PHASES = ['LAUNCH', 'TRANSIT', 'SEARCH', 'CONFIRM', 'RECOVER', 'DONE']
 FIT = ['poor', 'fair', 'good', 'excellent']
 W_DIST, W_FIT, W_SW, W_OPP, BIG = 1.0, 1.0, 0.3, 0.5, 1e4
 ROUTINE = {'nominal', 'candidate_found', 'task_complete'}
-DEFAULT_PLAN = {'survey_altitude_m': 30.0, 'transit_formation': 'v', 'formation_spacing_m': 8.0,
+# survey altitude is not the LLM's: scenario alt_survey (live Sonnet traded detection for height)
+DEFAULT_PLAN = {'transit_formation': 'v', 'formation_spacing_m': 8.0,
                 'search_end_frac': 0.7, 'recover_frac': 0.85, 'priority_sectors': [],
                 'rationale': 'default plan'}
 PLAN_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'required': list(DEFAULT_PLAN),
     'properties': {
-        'survey_altitude_m': {'type': 'number',
-                              'description': 'survey altitude, 20-40 m; default 30'},
         'transit_formation': {'type': 'string',
                               'enum': ['v', 'column', 'line', 'diamond', 'circle']},
         'formation_spacing_m': {'type': 'number', 'description': 'metres, 8-12; default 8'},
@@ -109,7 +108,7 @@ class Coordinator(Node):
         self.phase, self.phase_t, self.stage = 'IDLE', self.now(), ''
         self.t0: float | None = None
         self.t_max = self.p['t_max_s']
-        self.plan = dict(DEFAULT_PLAN)
+        self.plan = dict(DEFAULT_PLAN, survey_altitude_m=self.p['alt_survey'])
         self.planning = False
         self.last_plan_t = -math.inf
         self.assign: dict[str, int] = {}               # drone -> sector index
@@ -260,6 +259,7 @@ class Coordinator(Node):
             return
         self.planning, self.last_plan_t = True, self.now()
         x0, x1, y0, y1 = self.p['ao']
+        h = self.p['alt_survey']
         far = [round(scenario.link_q(self.p, math.hypot(x1, (s[1] + s[3]) / 2)), 2)
                for s in self.sectors]
         ctx = json.dumps({
@@ -274,18 +274,14 @@ class Coordinator(Node):
             'wind_m_s': [round(w, 1) for w in self.wind], 'mission_clock_s': self.t_max,
             'battery_wh': self.p['E_0'], 'swarm_now': self.swarm_line(),
             'coverage_now': round(self.cov.fraction(), 2),
-            # live Sonnet maxed the altitude "to clear obstacles": state what flight already
-            # handles and what altitude really trades
+            # state what flight already handles, so the plan spends effort on what it decides
             'flight_facts': {
-                'obstacle_avoidance': 'automatic at any altitude (flight controllers steer '
-                                      'around obstacles); altitude need not clear them',
+                'obstacle_avoidance': 'automatic (flight controllers steer around obstacles)',
                 'confirmation': 'a detection is confirmed only after an inspection from 15 m '
                                 'or lower, which costs a drone time and energy',
-                'survey_altitude_tradeoff': {
-                    f'{h} m': {'p_detect_per_pass': round(scenario.p_detect(
-                        self.p, h, self.p['v_survey']), 2),
-                               'swath_m': round(scenario.lane_spacing(self.p, h))}
-                    for h in (20, 30, 40)}}})
+                'survey': {'altitude_m': h, 'p_detect_per_pass': round(scenario.p_detect(
+                               self.p, h, self.p['v_survey']), 2),
+                           'swath_m': round(scenario.lane_spacing(self.p, h))}}})
         goal = Reason.Goal(system='You plan search-and-rescue missions for a drone swarm. Return '
                            'only the JSON plan; respect the stated ranges.',
                            context=ctx, response_schema=json.dumps(PLAN_SCHEMA))
@@ -314,7 +310,7 @@ class Coordinator(Node):
         clamp = lambda v, lo, hi: min(hi, max(lo, float(v)))    # noqa: E731
         if raw['transit_formation'] not in ('v', 'column', 'line', 'diamond', 'circle'):
             raise ValueError(f'formation {raw["transit_formation"]!r}')
-        return {'survey_altitude_m': clamp(raw['survey_altitude_m'], 20, 40),
+        return {'survey_altitude_m': self.p['alt_survey'],
                 # spacing >= 2 d_sep, so the separation reflex never fights the formation
                 'formation_spacing_m': clamp(raw['formation_spacing_m'], 2 * self.p['d_sep'], 12),
                 'transit_formation': raw['transit_formation'],
