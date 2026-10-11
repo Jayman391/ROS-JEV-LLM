@@ -65,6 +65,12 @@ PLAN_SCHEMA = {
         'priority_sectors': {'type': 'array', 'items': {'type': 'string'}},
         'rationale': {'type': 'string'}}}
 EXPECT = {'takeoff': 'launch', 'rtb': 'recall', 'hold': 'ordered'}
+SLOT_X_MIN = 12.0       # rearmost formation slot: ahead of the pads (x = 0), inside the H1 fence
+
+
+def ahead_shift(xs: list[float], x_min: float) -> float:
+    """How far to move a formation along +x so no slot is behind x_min (0 if none is)."""
+    return max(0.0, x_min - min(xs, default=x_min))
 
 
 def catalog_for(path: str, drones: list[str], sectors: list[str]) -> dict:
@@ -538,10 +544,13 @@ class Coordinator(Node):
 
         def done(fut):
             res = fut.result()
+            # slots trail behind the lead point; shift the whole shape so its tail is ahead of
+            # the pads (8 drones in a 10 m column reached x = -58, past the H1 fence at -20)
+            dx = ahead_shift([sl.x for sl in res.slots], SLOT_X_MIN)
             for d, sl in zip(drones, res.slots):
-                self.slots[d] = (sl.x, sl.y, sl.z)
-                self.order(d, 'formation', {'point': [sl.x, sl.y, sl.z]})
-            self.event(f'{res.message} at ({centre[0]:.0f}, {centre[1]:.0f})')
+                self.slots[d] = (sl.x + dx, sl.y, sl.z)
+                self.order(d, 'formation', {'point': list(self.slots[d])})
+            self.event(f'{res.message} at ({centre[0] + dx:.0f}, {centre[1]:.0f})')
         self.formation_cli.call_async(req).add_done_callback(done)
 
     def at_slots(self, tol: float) -> bool:
@@ -648,6 +657,13 @@ class Coordinator(Node):
         """Likely survivors may pull a surveying drone; anything else waits for an idle one."""
         if self.phase not in ('SEARCH', 'CONFIRM'):
             return False                                  # formations and recovery stay intact
+        # a drone already orbiting it (its own W1 inspection) is the inspection: a second drone
+        # on the same orbit only breaches separation
+        here = next((d for d, s in self.status.items() if s.task == 'ORBIT' and math.hypot(
+            s.position.x - t['x'], s.position.y - t['y']) < 15), None)
+        if here:
+            t['status'], t['assigned'], t['since'] = 'inspecting', here, self.now()
+            return True
         likely = t.get('probs', {}).get('survivor', 0.0) >= 0.3
         pick = self.cheapest(t, exclude, idle_only=not likely)
         if pick is None:

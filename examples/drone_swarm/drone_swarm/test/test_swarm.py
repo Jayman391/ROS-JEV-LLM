@@ -90,6 +90,16 @@ def test_order_ack_tells_formation_slots_apart():
     assert Coordinator.expect('takeoff', {}) == 'launch'
 
 
+def test_formation_tail_stays_ahead_of_the_pads():
+    """Live regression: an 8-drone 10 m column trailed to x = -58, past the H1 fence at -20;
+    four drones never reached their slots and TRANSIT timed out."""
+    from drone_swarm.coordinator import SLOT_X_MIN, ahead_shift
+    column = [12.0 - 10 * k for k in range(8)]                   # 12 .. -58
+    dx = ahead_shift(column, SLOT_X_MIN)
+    assert min(x + dx for x in column) == SLOT_X_MIN and dx == 70
+    assert ahead_shift([20.0, 30.0], SLOT_X_MIN) == 0             # already ahead: unchanged
+
+
 def test_plan_cannot_change_survey_altitude():
     """Survey altitude is the scenario's (20 m), whatever the LLM plan says."""
     p = params()
