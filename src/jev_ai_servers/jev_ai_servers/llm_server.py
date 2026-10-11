@@ -27,6 +27,18 @@ from jev_ai_servers.llm_backends.replay import request_key
 # not checked against the live pricing page. Haiku 5.5 doubles above 100K-token prompts.
 PRICING = {'claude-haiku-5-5': [0.10, 0.50], 'claude-sonnet-5-5': [2.0, 10.0],
            'claude-opus-5-5': [4.0, 20.0]}
+MIN_GOAL_TIMEOUT_S = 1.0
+
+
+def goal_timeout(asked: str, cap: float) -> float:
+    """A goal's ``timeout_s`` option (the engine's llm_timeout) may shorten the server's deadline,
+    never extend it, and never below 1 s: deadline misses count against the shared breaker, so a
+    tiny value would let one client trip it for all. NaN / inf / junk get the server's."""
+    try:
+        t = float(asked)
+    except ValueError:
+        return cap
+    return min(max(t, MIN_GOAL_TIMEOUT_S), cap) if math.isfinite(t) else cap
 
 
 class LlmServer(BackendServer):
@@ -80,11 +92,7 @@ class LlmServer(BackendServer):
         defaults = {'effort': self.p('effort'), 'max_tokens': str(self.p('max_tokens'))}
         options = {k: v for k, v in defaults.items() if v != ''}
         options.update({kv.key: kv.value for kv in goal.options})
-        # A goal's timeout_s (the engine's llm_timeout) may shorten the server's, not extend it.
-        try:
-            timeout_s = min(float(options.pop('timeout_s', 'inf')), self.p('timeout_s'))
-        except ValueError:
-            timeout_s = self.p('timeout_s')
+        timeout_s = goal_timeout(options.pop('timeout_s', ''), self.p('timeout_s'))
         # The server's max_tokens is a ceiling a goal may lower but not raise (cost per call).
         try:
             asked = int(options.get('max_tokens', self.p('max_tokens')))

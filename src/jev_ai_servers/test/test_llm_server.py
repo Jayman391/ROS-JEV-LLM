@@ -13,7 +13,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.lifecycle import TransitionCallbackReturn
 from rclpy.parameter import Parameter
 
-from jev_ai_servers.llm_server import LlmServer
+from jev_ai_servers.llm_server import LlmServer, goal_timeout
 
 SCHEMA = json.dumps({'type': 'object', 'additionalProperties': False, 'required': ['weights'],
                      'properties': {'weights': {'type': 'object', 'properties': {
@@ -163,6 +163,12 @@ def test_pricing_ceiling_and_read_only_params():
         assert s.budget.admit(time.monotonic()) == '' and s.budget.usd_last_hour >= 1e6
     finally:
         h.close()
+
+
+def test_goal_timeout_only_shortens_within_bounds():
+    for asked, want in (('4', 4.0), ('30', 6.0), ('0.001', 1.0), ('-1', 1.0), ('nan', 6.0),
+                        ('inf', 6.0), ('', 6.0), ('soon', 6.0)):
+        assert goal_timeout(asked, 6.0) == want, asked
 
 
 def test_anthropic_without_key_fails_configure(monkeypatch):

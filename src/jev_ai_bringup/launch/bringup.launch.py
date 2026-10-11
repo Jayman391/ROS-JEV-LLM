@@ -24,10 +24,11 @@ def generate_launch_description():
     params = Arg('params_file')
     return LaunchDescription([
         DeclareLaunchArgument('params_file', default_value=PARAMS),
-        DeclareLaunchArgument('jev_backend', default_value='typesafe',
-                              description='typesafe | llama_ros | mock | replay'),
-        DeclareLaunchArgument('llm_backend', default_value='anthropic',
-                              description='anthropic | openai_compat | mock | replay'),
+        # keyless by default: the first launch works without API keys (live: typesafe / anthropic)
+        DeclareLaunchArgument('jev_backend', default_value='mock',
+                              description='mock | typesafe | llama_ros | replay'),
+        DeclareLaunchArgument('llm_backend', default_value='mock',
+                              description='mock | anthropic | openai_compat | replay'),
         DeclareLaunchArgument('catalog', default_value='',
                               description='catalog YAML for decide_server ("" = no decide_server)'),
         DeclareLaunchArgument('run_id', default_value='',
