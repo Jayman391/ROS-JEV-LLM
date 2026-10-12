@@ -66,10 +66,11 @@ shift (`t_max_s`). The episode ends when every order has shipped or at `t_max_s`
 Each op yields a true quality
 
 ```
-q = 1 − 0.6·wear² − 0.35·(1 − grip) − 0.03·max(0, pose_mm − 1) − 0.15·[coop partner grip marginal] + N(0, 0.04)
+q = 1 − 0.6·wear² − 0.35·(1 − grip) − 0.03·max(0, pose_mm − 1) + N(0, 0.04)
 ```
 
-The grip term applies only to gripping ops (pick, insert, fasten). A part is **defective** if any op has
+The grip term applies only to gripping ops (pick, insert, fasten); for `fasten` it is the holding
+partner's grip and `wear` is the worse of the two arms. A part is **defective** if any op has
 `q < q_min` (0.75). A rework redoes one op with a fresh draw. Truth goes only to the scorer
 (`/line/outcomes`, one `PartOutcome` per part that leaves the line).
 
@@ -99,6 +100,7 @@ Grip and pose are drawn when an op becomes pending for an arm; a regrip redraws 
 | node | lang | role |
 |---|---|---|
 | `line_sim` | C++ | the world: conveyor, buffers, faults, quality, sensors, `/clock`, RViz markers; `Operate` action server per arm; `Release`, `Route`, `Dispose` services |
+| `line_gz` (optional) | C++ | the Gazebo Fortress puppet view: mirrors pallets (`/line/markers`) and arm states (`/arm_x/status`) into a generated world over ign-transport; display only, nothing flows back |
 | `line_supervisor` | Py | jev_ai supervisor: releases, the routing rule, disruption response, quality watch |
 | `arm_agent` ×5 | Py | jev_ai worker per arm (`/arm_x`): runs its ops; judges anomalous pre-op readings and late coop partners |
 | `qa_agent` | Py | jev_ai worker: disposition of each inspected part |
@@ -114,7 +116,7 @@ line_sim ──/line/state (LineState)────▶ line_supervisor ──/lin
 arm_agent, qa_agent ──/line/reports──▶ line_supervisor ──/line/directives──▶ arm_agent
 every engine ──/decisions──▶ decision_logger, dashboard;   status ──/diagnostics──▶ dashboard
 line_sim ──/line/outcomes (PartOutcome)──▶ line_scorer ──/labels──▶ ros2 jev calibrate
-line_sim ──/line/markers──▶ RViz
+line_sim ──/line/markers──▶ RViz, line_gz ──set_pose_vector, visual_config, joint cmd_pos──▶ Gazebo
 ```
 
 **`Operate` goal kinds:**
@@ -158,6 +160,7 @@ J = 10·good_shipped + 3·good_on_time − 40·escaped_defects − 10·scrapped_
 ```bash
 ros2 launch assembly_line assembly_line.launch.py                      # keyless mocks, headless
 ros2 launch assembly_line assembly_line.launch.py rviz:=true           # line view (noVNC :6080)
+ros2 launch assembly_line assembly_line.launch.py gazebo:=true         # Gazebo puppet view
 ros2 launch assembly_line assembly_line.launch.py jev_backend:=typesafe llm_backend:=anthropic
 # dashboard: http://localhost:8080
 ```

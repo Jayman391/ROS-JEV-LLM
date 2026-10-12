@@ -5,6 +5,12 @@
 #   docker build -f deploy/docker/Dockerfile.assembly_line -t jev-ai-line:humble .
 #   docker compose -f deploy/compose/assembly_line.yaml up -d
 #   # line view: http://localhost:6082/vnc.html (password: docker compose logs viz | grep noVNC)
+#
+#   # + the Gazebo puppet view (needs jev-ai-swarm:humble, the swarm's Gazebo image):
+#   docker build -f deploy/docker/Dockerfile.assembly_line --build-arg BASE=jev-ai-swarm:humble \
+#     -t jev-ai-line-gz:humble .
+#   docker compose -f deploy/compose/assembly_line.yaml --profile gazebo up -d
+#   # Gazebo: http://localhost:6083/vnc.html (password: docker compose logs gazebo | grep noVNC)
 #   # decisions + line status: http://localhost:8080
 #   docker compose -f deploy/compose/assembly_line.yaml down
 #
@@ -69,3 +75,13 @@ services:
     deploy:
       resources:
         limits: {cpus: '2', memory: 1G}
+  gazebo:                             # Gazebo server + GUI (noVNC) + line_gz in one container
+    <<: *line
+    profiles: [gazebo]
+    image: ${JEV_AI_GZ_IMAGE:-jev-ai-line-gz:humble}
+    command: /gui.sh ros2 launch assembly_line gazebo.launch.py
+    ports:
+      - "127.0.0.1:${GZ_NOVNC_PORT:-6083}:6080"
+    deploy:
+      resources:
+        limits: {cpus: '4', memory: 3G}

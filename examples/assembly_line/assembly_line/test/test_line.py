@@ -140,6 +140,9 @@ def test_mock_covers_every_class():
     escalate = {'monitor': qw(1, 0.2), 'inspect_tool': qw(3, 0.4),
                 'order_tool_change': qw(5, 0.7)}
 
+    # full-shift regression: parts 9 and 17 escaped with only low marginal readings (true q 0.71-0.73)
+    assert top('disposition', qa([0.9, 0.73, 0.9, 0.9], 0)) == 'rework'
+    assert top('disposition', qa([0.9, 0.73, 0.9, 0.9], 2)) == 'quarantine'
     for question, cases in (('action', op), ('coop_action', coop), ('disposition', disp),
                             ('next_product', release), ('response', response),
                             ('escalate', escalate)):
@@ -196,3 +199,28 @@ def test_labels():
 def test_scenario_file_is_ros_params():
     raw = yaml.safe_load((CONFIG / 'scenario.yaml').read_text())
     assert set(raw) == {'/**'} and 'ros__parameters' in raw['/**']
+
+
+# --- Gazebo puppet world -------------------------------------------------------------------------
+
+def test_gz_world_arms_reach_their_pallet():
+    import math
+    import xml.etree.ElementTree as ET
+    from assembly_line import gz_world as g
+    p = params()
+    _, q1, q2 = g.poses()['reach']
+    d = g.L1 * math.sin(q1) + g.L2 * math.sin(q1 + q2)            # forearm tip from the shoulder
+    z = g.H0 + g.L1 * math.cos(q1) + g.L2 * math.cos(q1 + q2)
+    assert abs(d - math.hypot(g.ARM_SIDE, g.ARM_Y)) < 1e-6
+    assert abs(z - (g.Z0 + 0.3 + 0.175 + 0.07)) < 1e-6              # just over the pallet top
+    for name, (x, y, yaw) in g.arm_bases(p).items():                 # each faces its slot
+        xs = g.DX * scenario.arm(p, name)['station']
+        assert abs(x + d * math.cos(yaw) - xs) < 1e-6 and abs(y + d * math.sin(yaw)) < 1e-6
+    world = ET.fromstring(g.world_sdf(p)).find('world')
+    names = {m.get('name') for m in world.findall('model')}
+    assert set(p['arms']) <= names and f'pallet_{g.PALLET_POOL - 1}' in names
+    # live-view regression: visual_config matches the parent link by plain name ("l" was shared,
+    # so no pallet or arm ever changed colour)
+    links = [link.get('name') for link in world.iter('link')]
+    lit = [f'pallet_{i}_link' for i in range(g.PALLET_POOL)] + [f'{a}_column' for a in p['arms']]
+    assert all(links.count(n) == 1 for n in lit)

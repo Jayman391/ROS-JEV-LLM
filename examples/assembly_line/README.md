@@ -13,6 +13,7 @@ discrete-event simulator, and jev_ai makes the judgement calls while rules do th
 ```bash
 ros2 launch assembly_line assembly_line.launch.py              # keyless mocks; dashboard :8080
 ros2 launch assembly_line assembly_line.launch.py rviz:=true   # line view
+ros2 launch assembly_line assembly_line.launch.py gazebo:=true # Gazebo puppet view (Fortress)
 ros2 launch assembly_line assembly_line.launch.py jev_backend:=typesafe llm_backend:=anthropic
 ```
 
@@ -20,6 +21,7 @@ ros2 launch assembly_line assembly_line.launch.py jev_backend:=typesafe llm_back
 |---|---|
 | `line_interfaces` | `ArmStatus`, `LineState`, `QaReading`, `PartOutcome`; `Release`, `Route`, `Dispose`; `Operate` |
 | `line_control` (C++) | `line_sim`: the world (`line.hpp`, gtested without ROS), `/clock`, arm action servers, RViz markers |
+| `line_gz` (C++, optional) | the Gazebo puppet: pallets and arm poses/colours mirrored from `line_sim` into a generated Fortress world (display only; skipped where Gazebo is missing) |
 | `assembly_line` (Py) | agents, scorer, mock rules, catalogs, scenario, launch, `ros2 jev search` runner |
 
 Docs: [system model](../../docs/examples/assembly_line/SYSTEM_MODEL.md) (the world, sensors,

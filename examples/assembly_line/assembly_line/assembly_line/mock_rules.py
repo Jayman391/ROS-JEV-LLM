@@ -122,6 +122,10 @@ def _disposition(s):
         return [0.05, 0.75, 0.15, 0.05] if left else [0.05, 0.0, 0.6, 0.35]
     if n_suspect:
         return [0.3, 0.55, 0.15, 0.0] if left else [0.4, 0.0, 0.55, 0.05]
+    # a low marginal reading is near a coin flip on q_min (0.75); an escape costs far more than a redo
+    lows = [float(x) for x in re.findall(r'marginal \((\d\.\d+)\)', r) if float(x) < 0.76]
+    if lows:
+        return [0.3, 0.6, 0.1, 0.0] if left else [0.35, 0.0, 0.6, 0.05]
     return [0.75, 0.2, 0.05, 0.0]
 
 

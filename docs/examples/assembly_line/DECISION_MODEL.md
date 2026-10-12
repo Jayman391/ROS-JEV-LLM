@@ -60,7 +60,7 @@ What is decided where, by whom, and why. The world is in [SYSTEM_MODEL.md](SYSTE
   | `wait_recover` (status quo) | keep routes; work waits for the arm |
   | `reroute` | route new and in-flight work around the arm until it recovers. Upstream alternatives cost a lap |
   | `slow_line` | lower the WIP cap to `wip_slow` until it recovers, so fewer pallets pile up |
-  | `pause_station` | order the arm out of service for `pause_s` (directive `pause`), route around it, then order a tool change. For repeat offenders |
+  | `pause_station` | order a tool change and take the arm out of service for `pause_s` (directives `tool_change`, `pause`), routing around it. For repeat offenders |
 
 - **Encodes:** the event (what, how long ago, how many this run, estimated clear time), the arm
   (station, wear, parts waiting), alternatives (which ops can move and at what cost; `fasten` has

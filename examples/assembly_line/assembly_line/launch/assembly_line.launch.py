@@ -2,6 +2,7 @@
 
     ros2 launch assembly_line assembly_line.launch.py                       # keyless mocks
     ros2 launch assembly_line assembly_line.launch.py rviz:=true            # line view
+    ros2 launch assembly_line assembly_line.launch.py gazebo:=true          # Gazebo puppet view
     ros2 launch assembly_line assembly_line.launch.py jev_backend:=typesafe llm_backend:=anthropic
     ros2 launch assembly_line assembly_line.launch.py seed:=3 t_max_s:=900
     # decisions + line status: http://localhost:8080
@@ -25,13 +26,14 @@ from assembly_line import scenario
 SHARE = get_package_share_directory('assembly_line')
 SCENARIO = SHARE + '/config/scenario.yaml'
 PARAMS = SHARE + '/config/line_params.yaml'
+GAZEBO = SHARE + '/launch/gazebo.launch.py'
 BRINGUP = get_package_share_directory('jev_ai_bringup') + '/launch/bringup.launch.py'
 REMAP = [('decisions', '/decisions'), ('reports', '/line/reports'),
          ('directives', '/line/directives')]
 
 
 def line(context):
-    keys = ('seed', 't_max_s', 'out_dir', 'rviz', 'run_id', 'jev_backend', 'llm_backend',
+    keys = ('seed', 't_max_s', 'out_dir', 'rviz', 'gazebo', 'run_id', 'jev_backend', 'llm_backend',
             'dashboard_port', 'supervisor_catalog', 'arm_catalog', 'qa_catalog')
     a = {k: Arg(k).perform(context) for k in keys}
     seed = int(a['seed'])
@@ -70,6 +72,9 @@ def line(context):
         nodes.append(Node(package='rviz2', executable='rviz2', output='log',
                           arguments=['-d', SHARE + '/config/line.rviz'],
                           parameters=[{'use_sim_time': True}]))
+    if a['gazebo'] == 'true':
+        nodes.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(GAZEBO),
+                                              launch_arguments={'out_dir': a['out_dir']}.items()))
     return nodes
 
 
@@ -79,6 +84,8 @@ def generate_launch_description():
         DeclareLaunchArgument('t_max_s', default_value='', description='"" = scenario (1500)'),
         DeclareLaunchArgument('rviz', default_value='false',
                               description='RViz line view (needs a display: noVNC in the image)'),
+        DeclareLaunchArgument('gazebo', default_value='false',
+                              description='Gazebo puppet view (the jev-ai-line-gz image)'),
         DeclareLaunchArgument('jev_backend', default_value='mock',
                               description='mock | typesafe | llama_ros | replay'),
         DeclareLaunchArgument('llm_backend', default_value='mock',

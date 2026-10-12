@@ -4,6 +4,11 @@
 #
 #   docker build -f deploy/docker/Dockerfile -t jev-ai:humble .
 #   docker build -f deploy/docker/Dockerfile.assembly_line -t jev-ai-line:humble .
+#
+# On the swarm's Gazebo Fortress image it also builds line_gz, the Gazebo puppet view (line_gz
+# builds to nothing where Gazebo is missing):
+#   docker build -f deploy/docker/Dockerfile.assembly_line --build-arg BASE=jev-ai-swarm:humble \
+#     -t jev-ai-line-gz:humble .
 ARG BASE=jev-ai:humble
 FROM ${BASE}
 SHELL ["/bin/bash", "-c"]

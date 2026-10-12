@@ -26,5 +26,6 @@ setup(
         'arm_agent = assembly_line.arm_agent:main',
         'qa_agent = assembly_line.qa_agent:main',
         'line_scorer = assembly_line.scorer:main',
+        'line_world = assembly_line.gz_world:main',
     ]},
 )

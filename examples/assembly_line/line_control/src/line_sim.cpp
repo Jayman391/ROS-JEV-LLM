@@ -375,7 +375,9 @@ class LineSim : public rclcpp::Node {
                     line_->p.products.begin();
       static const std::array<std::array<float, 3>, 3> pc = {
           {{0.9f, 0.25f, 0.2f}, {0.2f, 0.45f, 0.95f}, {0.2f, 0.8f, 0.35f}}};
-      ma.markers.push_back(marker(id++, Marker::CUBE, x, y, 0.3, 0.45, 0.45, 0.35, pc[prod % 3]));
+      Marker pallet = marker(pid, Marker::CUBE, x, y, 0.3, 0.45, 0.45, 0.35, pc[prod % 3]);
+      pallet.ns = "pallet";   // id = part id: line_gz follows each pallet by it
+      ma.markers.push_back(pallet);
       ma.markers.push_back(text(id++, x, y, 0.75, pt.product + std::to_string(pid)));
     }
     marker_pub_->publish(ma);
