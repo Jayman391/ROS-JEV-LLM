@@ -6,7 +6,10 @@ The question set ``step`` (W1-W7, ``config/drone.yaml``) runs at 1 Hz with act-t
   local detection (irreversible past its commit point, descent below 15 m), ``hold``,
   ``return_to_base``, ``request_support`` (a priority report, no motion change), ``land_now``.
 - W2/W3 are the beliefs and priority sent up with reports; W5/W7 decide when and what to report;
-  W6 ``unusual`` re-triggers the engine at high priority; W4 is advisory (H6 is deterministic).
+  W6 ``unusual`` re-triggers the engine at high priority. (W4 energy_risk was removed: never read.)
+- With no order and nothing to inspect, ``require`` holds the drone (no model call can pick noise).
+- Out of link, a SURVEY / ORBIT / GOTO runs to its end (H7 waits); tracks reported while the link
+  was poor or lost are resent when it comes back.
 Masks (DECISION_MODEL §5) come from DroneStatus, the same numbers the C++ safety layer uses.
 Coordinator orders arrive as jev_ai directives through comms_sim; each is a decision event in the
 directive's noise epoch, so drones answering the same order share their Gumbel noise.
@@ -30,6 +33,7 @@ W1 = ['continue', 'inspect', 'hold', 'return_to_base', 'request_support', 'land_
 COMMIT_ALT = 15.0          # inspect becomes irreversible below this altitude
 SUPPORT_WAIT_S = 20.0
 REPORT_GAP_S = 3.0
+ON_TASK = ('SURVEY', 'ORBIT', 'GOTO')   # H7 lets these finish out of link (flight_controller)
 
 
 def compass(dx: float, dy: float) -> str:
@@ -102,9 +106,14 @@ class DroneAgent(Node):
         b = 'good' if m.quality >= 0.7 else 'degraded' if m.quality >= 0.3 else \
             'poor' if m.quality >= 0.1 else 'lost'
         if b != self.link_bucket:
+            back = self.link_bucket in ('poor', 'lost') and b in ('good', 'degraded')
             self.link_bucket, self.link_since = b, self.now()
             if b in ('poor', 'lost'):
                 self.engine.trigger('link_change', priority='high')
+            if back:                                   # resend what the dead zone swallowed
+                for t in self.tracks.values():
+                    if len(t['sightings']) > t['reported']:
+                        self.report('nominal', None, priority=0.3, track=t)
         self.link = m
 
     def _detections(self, msg: DetectionArray) -> None:
@@ -279,11 +288,12 @@ class DroneAgent(Node):
             out.add('inspect')                                   # detours only while searching
         if s.margin < 0.05:
             out.add('hold')
-        if self.support_since is not None and self.now() - self.support_since < SUPPORT_WAIT_S:
-            out.add('request_support')
+        if self.support_since is not None and self.now() - self.support_since < SUPPORT_WAIT_S or \
+                not (self.unresolved() or s.faults or s.reflexes):
+            out.add('request_support')              # help is for a detection, hazard or fault
         if not s.critical or s.over_obstacle:
             out.add('land_now')
-        if s.link_lost_s >= self.p['lost_link_hold_s']:          # H7
+        if s.link_lost_s >= self.p['lost_link_hold_s'] and s.task not in ON_TASK:   # H7
             out |= set(W1) - {'hold', 'return_to_base', 'land_now'}
         if not self.live_order() and self.inspecting is None:
             out.add('continue')                                  # no task to continue
@@ -292,12 +302,17 @@ class DroneAgent(Node):
         return {'next_action': out}
 
     def require(self, qset: str) -> dict[str, str]:
-        """H8: a critical failure that cannot make it home lands in place."""
+        """H8: a critical failure that cannot make it home lands in place. A healthy drone with
+        no order and nothing to inspect holds: with continue and inspect masked, the models'
+        leftovers were noise (live: request_support -> the coordinator recalled the drone)."""
         s = self.status
         if s is None or not s.airborne:
             return {'next_action': 'continue'}          # on the pad: FORCED, no LLM spend
         if s.critical and s.energy_frac < s.energy_needed_frac:
             return {'next_action': 'land_now'}
+        masked = self.mask(qset)['next_action']
+        if {'continue', 'inspect'} <= masked and 'hold' not in masked and not s.critical:
+            return {'next_action': 'hold'}              # wait for orders; the coordinator decides
         return {}
 
     def on_decision(self, d: Decision) -> None:
@@ -488,7 +503,8 @@ class DroneAgent(Node):
             if d is not None and t['id'] == self.encoded:
                 beliefs = {q: d.fused[q] for q in ('detection_class', 'detection_priority')
                            if q in d.fused}
-            t['reported'] = len(t['sightings'])
+            if self.link_bucket in ('good', 'degraded'):   # else likely dropped: resend later
+                t['reported'] = len(t['sightings'])
         self.hierarchy.report(kind, subject=t['id'] if t else '', priority=priority,
                               beliefs=beliefs, payload=payload)
 

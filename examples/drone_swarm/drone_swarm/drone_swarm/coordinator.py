@@ -1,21 +1,23 @@
 """mission_coordinator (B6): the swarm's supervisor, a jev_ai DecisionEngine + Hierarchy.
 
 Mission phases LAUNCH -> TRANSIT -> SEARCH -> CONFIRM -> RECOVER -> DONE (| ABORT), SYSTEM_MODEL
-§1.
-Code owns the guards: ``advance`` is masked until the phase's work is done and *required* once its
-time budget is spent. The models decide within them (DECISION_MODEL §3.2):
+§1. Rules own the routine (user, 2026-10-11; live, Jev's hedged `advance` cost 2 min of hovering):
+a phase advances when its work is done or its time is up (SEARCH and CONFIRM end from the time the
+swarm needs to get home); a short hop to the area skips the transit formation; sectors are
+allocated by Hungarian over distance and energy; a recall needs a cause. The models judge
+(DECISION_MODEL §3.2):
 
-- ``global`` (0.5 Hz): C1 phase_transition, C2 transit_formation, C5 mission_risk (>= 0.75 ->
-  app:risk), C6 replan_needed (-> Sonnet replan), C8 relay_needed (-> a relay drone).
+- ``global`` (0.5 Hz, Jev only when its state's words change): C1 phase_transition (stop early:
+  recover_all / abort, both two-key), C2 transit_formation, C5 mission_risk (>= 0.75 -> app:risk),
+  C8 relay_needed (-> a relay drone).
 - ``track`` (per fused detection track, one at a time): C3 verdict; confirm_* is irreversible and
   needs low-altitude evidence; request_inspection dispatches the cheapest feasible drone.
-- ``report`` (per worker report that is not routine): C4 response.
-- ``fit`` (generated: one score per drone x sector, Jev only): C7, a term of the Hungarian
-  sector-allocation cost (§7) solved by formation_planner (/swarm/allocate).
+- ``report`` (per worker report that is not routine): C4 response; options without a cause are
+  masked, and a report left with only `acknowledge` is acknowledged without asking.
 
-Mission planning is app code on the coordinator's LLM (Sonnet, effort medium): a structured plan,
-validated and clamped; re-asked once, then a default plan. Orders go down as directives through
-comms_sim (lossy), so standing orders are re-sent until the drone's status shows them.
+The mission plan (formation, spacing) is one Sonnet call at the start: validated and clamped;
+re-asked once, then a default plan. Orders go down as directives through comms_sim (lossy), so
+standing orders are re-sent until the drone's status shows them.
 Single-threaded: engine callbacks and the FSM never race.
 """
 from __future__ import annotations
@@ -24,7 +26,6 @@ import json
 import math
 from collections import deque
 
-import yaml
 from ament_index_python.packages import get_package_share_directory
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import Point, Vector3
@@ -43,12 +44,13 @@ from jev_ai import Decision, DecisionEngine, Hierarchy
 from jev_ai.ros.engine import run
 
 PHASES = ['LAUNCH', 'TRANSIT', 'SEARCH', 'CONFIRM', 'RECOVER', 'DONE']
-FIT = ['poor', 'fair', 'good', 'excellent']
-W_DIST, W_FIT, W_SW, W_OPP, BIG = 1.0, 1.0, 0.3, 0.5, 1e4
+W_DIST, W_SW, W_OPP, BIG = 1.0, 0.3, 0.5, 1e4
 ROUTINE = {'nominal', 'candidate_found', 'task_complete'}
+SHORT_HOP_M = 150.0     # area this close to base: no transit / regroup formation (pure hover cost)
+CONFIRM_S = 120.0       # sim s kept for CONFIRM before the swarm must head home
+OPTIONAL = {'dispatch_support', 'reassign_sector', 'recall_drone'}   # C4 needs a cause for these
 # survey altitude is not the LLM's: scenario alt_survey (live Sonnet traded detection for height)
-DEFAULT_PLAN = {'transit_formation': 'v', 'formation_spacing_m': 8.0,
-                'search_end_frac': 0.7, 'recover_frac': 0.85, 'priority_sectors': [],
+DEFAULT_PLAN = {'transit_formation': 'v', 'formation_spacing_m': 8.0, 'priority_sectors': [],
                 'rationale': 'default plan'}
 PLAN_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
@@ -57,11 +59,6 @@ PLAN_SCHEMA = {
         'transit_formation': {'type': 'string',
                               'enum': ['v', 'column', 'line', 'diamond', 'circle']},
         'formation_spacing_m': {'type': 'number', 'description': 'metres, 8-12; default 8'},
-        'search_end_frac': {'type': 'number',
-                            'description': 'latest end of SEARCH as a fraction of the mission '
-                                           'clock, 0.5-0.8; default 0.7'},
-        'recover_frac': {'type': 'number',
-                         'description': 'latest start of RECOVER, 0.75-0.9; default 0.85'},
         'priority_sectors': {'type': 'array', 'items': {'type': 'string'}},
         'rationale': {'type': 'string'}}}
 EXPECT = {'takeoff': 'launch', 'rtb': 'recall', 'hold': 'ordered'}
@@ -71,19 +68,6 @@ SLOT_X_MIN = 12.0       # rearmost formation slot: ahead of the pads (x = 0), in
 def ahead_shift(xs: list[float], x_min: float) -> float:
     """How far to move a formation along +x so no slot is behind x_min (0 if none is)."""
     return max(0.0, x_min - min(xs, default=x_min))
-
-
-def catalog_for(path: str, drones: list[str], sectors: list[str]) -> dict:
-    """The coordinator catalog plus the generated C7 ``fit`` set for these drones x sectors."""
-    cat = yaml.safe_load(open(path))
-    cat['question_sets']['fit'] = {
-        'state_keys': ['mission', 'pairs'], 'tick_hz': 0, 'augment': False,
-        'questions': {f'fit_{d}_{s}': {
-            'type': 'score', 'act': 'expectation', 'classes': [{'name': c} for c in FIT],
-            'instructions': f'How well suited is {d} to survey sector {s} now (distance, energy '
-                            'after the sector, how much of it is left)?'}
-                      for d in drones for s in sectors}}
-    return cat
 
 
 class Coordinator(Node):
@@ -122,21 +106,17 @@ class Coordinator(Node):
         self.recalled: set[str] = set()
         self.relaunched: set[str] = set()
         self.relay: str | None = None
-        self.u_fit: dict[tuple[str, int], float] = {}
-        self.fit_pending: float | None = None
         self.slots: dict[str, tuple[float, float, float]] = {}
         self.rtb_queue: list[str] = []
         self.mission_done: Future | None = None
         self.mission_gh = None
         self.result_summary = ''
         self.objective = ''
-        self.was_ready = False
         self.allocating = False
         self.surveyed: set[int] = set()             # sectors whose lawnmower finished
         self.survey_progress: dict[int, float] = {}    # sector -> best FC progress seen
 
-        self.engine = DecisionEngine(self, catalog_for(path, self.drones, self.snames),
-                                     encode_state=self.encode, mask=self.mask,
+        self.engine = DecisionEngine(self, path, encode_state=self.encode, mask=self.mask,
                                      require=self.require, on_decision=self.on_decision,
                                      current=self.current, run_id=run_id, agent='/coordinator',
                                      jev='/jev/decide',
@@ -321,8 +301,6 @@ class Coordinator(Node):
                 # spacing >= 2 d_sep, so the separation reflex never fights the formation
                 'formation_spacing_m': clamp(raw['formation_spacing_m'], 2 * self.p['d_sep'], 12),
                 'transit_formation': raw['transit_formation'],
-                'search_end_frac': clamp(raw['search_end_frac'], 0.5, 0.8),
-                'recover_frac': clamp(raw['recover_frac'], 0.75, 0.9),
                 'priority_sectors': [s for s in raw.get('priority_sectors', [])
                                      if s in self.snames],
                 'rationale': str(raw.get('rationale', ''))[:300]}
@@ -336,8 +314,7 @@ class Coordinator(Node):
         cost = f', ${res.cost_usd:.4f}' if res is not None else ''
         self.event(f'plan ({res.model if res else "?"}{cost}): survey '
                    f'{plan["survey_altitude_m"]:.0f} m, {plan["transit_formation"]} formation at '
-                   f'{plan["formation_spacing_m"]:.0f} m,'
-                   f' search ends by {plan["search_end_frac"]:.0%}; {plan["rationale"][:120]}')
+                   f'{plan["formation_spacing_m"]:.0f} m; {plan["rationale"][:120]}')
 
     # --- FSM -------------------------------------------------------------------------------------
 
@@ -361,10 +338,8 @@ class Coordinator(Node):
                 self.start_mission(self.p['t_max_s'])
         else:
             getattr(self, f'tick_{self.phase.lower()}', lambda: None)()
-            ready = self.ready() or self.forced()
-            if ready and not self.was_ready:
-                self.engine.trigger('ready', 'global')        # on the transition only
-            self.was_ready = ready
+            if self.phase != 'DONE' and (self.ready() or self.forced()):
+                self.advance()                                # a rule, not a model's call
             self.resend_orders()
             self.pump()
         self.publish()
@@ -396,10 +371,23 @@ class Coordinator(Node):
                            f'({self.cov.fraction(self.sectors[i]):.0%} covered)')
 
     def forced(self) -> bool:
-        e = self.elapsed() / self.t_max
-        return (self.phase == 'SEARCH' and e >= self.plan['search_end_frac']) or \
-            (self.phase == 'CONFIRM' and e >= self.plan['recover_frac']) or \
+        """The phase's time is up: SEARCH keeps CONFIRM_S plus the way home, CONFIRM the way
+        home (from where the drones actually are, not a fixed fraction of the clock)."""
+        left = self.t_max - self.elapsed()
+        return (self.phase == 'SEARCH' and left <= self.recover_lead_s() + CONFIRM_S) or \
+            (self.phase == 'CONFIRM' and left <= self.recover_lead_s()) or \
             (self.phase in ('LAUNCH', 'TRANSIT') and self.now() - self.phase_t > 120)
+
+    def recover_lead_s(self) -> float:
+        """Sim s RECOVER needs: the farthest airborne drone home, its descent, the 8 s landing
+        stagger, and 30 s of slack."""
+        air = [s for s in self.status.values() if s.airborne]
+        far = max((math.hypot(s.position.x, s.position.y) for s in air), default=0.0)
+        return far / self.p['v_transit'] + self.p['alt_transit'] / self.p['v_max_down'] + \
+            8.0 * len(air) + 30.0
+
+    def short_hop(self) -> bool:
+        return self.p['ao'][0] < SHORT_HOP_M
 
     def advance(self) -> None:
         if self.phase in ('RECOVER', 'ABORT'):
@@ -424,6 +412,9 @@ class Coordinator(Node):
             self.order(d, 'takeoff', {'altitude': self.p['alt_transit']}, delay=3.0 * k)
 
     def enter_transit(self) -> None:
+        if self.short_hop():                            # live: 2 min hovering for a 72 m hop
+            self.event(f'transit: area {self.p["ao"][0]:.0f} m away, straight to the sectors')
+            return self.advance()
         self.stage = 'assemble'
         self.form(self.formation(), (12.0, 0.0), 0.0)
 
@@ -433,18 +424,15 @@ class Coordinator(Node):
             self.form(self.formation(), (self.p['ao'][0] + 50.0, 0.0), 0.0, keep=True)
 
     def enter_search(self) -> None:
-        self.fit_pending = self.now()
-        self.engine.trigger('allocation', 'fit', fresh=True)
+        self.allocate()
 
     def tick_search(self) -> None:
-        if self.fit_pending is not None and self.now() - self.fit_pending > 15:
-            self.fit_pending = None                      # no fit answer: allocate without it
-            self.allocate()
+        if not self.assign:
+            self.allocate()                              # e.g. the planner wasn't ready yet
         self.note_surveyed()
         self.relaunch()
-        if self.fit_pending is None:
-            self.handoff()
-            self.dispatch_idle()
+        self.handoff()
+        self.dispatch_idle()
 
     def relaunch(self) -> None:
         """A healthy drone that went home on its own (not recalled, no fault, energy to spare)
@@ -469,17 +457,22 @@ class Coordinator(Node):
         self.dispatch_idle()
 
     def enter_recover(self) -> None:
+        if self.short_hop():
+            return self.land_all()
         self.stage = 'regroup'
         self.form(self.formation(), (15.0, 0.0), math.pi)
 
     def tick_recover(self) -> None:
         if self.stage == 'regroup' and (self.at_slots(5.0) or self.now() - self.phase_t > 90):
-            self.stage = 'land'
-            # staggered landing: nearest first, 8 s apart
-            order = sorted(self.available(), key=lambda d: math.hypot(
-                self.status[d].position.x, self.status[d].position.y))
-            for k, d in enumerate(order):
-                self.order(d, 'rtb', {}, delay=8.0 * k)
+            self.land_all()
+
+    def land_all(self) -> None:
+        """Staggered landing: nearest first, 8 s apart (pads are 2·d_sep apart)."""
+        self.stage = 'land'
+        order = sorted(self.available(), key=lambda d: math.hypot(
+            self.status[d].position.x, self.status[d].position.y))
+        for k, d in enumerate(order):
+            self.order(d, 'rtb', {}, delay=8.0 * k)
 
     def enter_abort(self) -> None:
         for d in self.drones:
@@ -518,9 +511,12 @@ class Coordinator(Node):
 
     def order_done(self, d: str) -> bool:
         """The drone acknowledged the standing order and its flight controller is idle (finished;
-        a drone that diverted on its own, e.g. a W1 inspection, is busy, not done)."""
+        a drone that diverted on its own, e.g. a W1 inspection, is busy, not done). Hovering in
+        its own `hold` (no order left: the agent's require) is idle too; counting it busy left
+        three sectors unsurveyed after their drones' inspections."""
         o, s = self.orders.get(d), self.status.get(d)
-        return bool(o and o['acked'] and s and s.task in ('IDLE', 'LANDED'))
+        return bool(o and o['acked'] and s and (s.task in ('IDLE', 'LANDED') or
+                                                (s.task == 'HOLD' and s.task_detail == 'waiting')))
 
     def available(self) -> list[str]:
         now = self.now()
@@ -594,8 +590,8 @@ class Coordinator(Node):
                     scenario.leg_wh(self.p, (x1, (y0 + y1) / 2), (0.0, 0.0), self.wind) + \
                     self.p['E_land_wh']
                 have = s.energy_frac * self.p['E_0'] - self.p['reserve'] * self.p['E_0']
-                cost.append(W_DIST * dist / 400 + W_FIT * (1 - self.u_fit.get((d, i), 0.5)) +
-                            W_SW * (self.assign.get(d, i) != i) + BIG * (need > have))
+                cost.append(W_DIST * dist / 400 + W_SW * (self.assign.get(d, i) != i) +
+                            BIG * (need > have))
         req = Allocate.Request(cost=cost, rows=len(drones), cols=len(sectors))
 
         def done(fut):
@@ -796,8 +792,9 @@ class Coordinator(Node):
                       f'{len(unres)} unresolved ({likely} likely survivor), '
                       f'{self.confirmed("dismissed")} dismissed')
             margins = {d: s.margin for d, s in self.status.items() if s.airborne}
-            tb = (f'search ends by {mmss(self.plan["search_end_frac"] * self.t_max)}, recover by '
-                  f'{mmss(self.plan["recover_frac"] * self.t_max)}')
+            lead = self.recover_lead_s()
+            tb = (f'search ends by {mmss(self.t_max - lead - CONFIRM_S)}, recover by '
+                  f'{mmss(self.t_max - lead)}')
             if margins:
                 worst = min(margins, key=margins.get)
                 tb += f'; energy-limited by {worst} (margin {margins[worst]:.2f})'
@@ -851,35 +848,13 @@ class Coordinator(Node):
             return {'mission': mission,
                     'report': f'{r["kind"]} (priority {r["priority"]:.2f}): {json.dumps(pay)}',
                     'sender': sline, 'sector': sector}
-        # fit
-        pairs = []
-        for d in self.drones:
-            s = self.status.get(d)
-            for i, n in enumerate(self.snames):
-                if s is None:
-                    pairs.append(f'{d}->{n}: unavailable')
-                    continue
-                x0, y0, x1, y1 = self.sectors[i]
-                dist = math.hypot(x0 - s.position.x, (y0 + y1) / 2 - s.position.y)
-                need = scenario.survey_wh(self.p, self.sectors[i], (s.position.x, s.position.y),
-                                          self.wind) / self.p['E_0']
-                left = s.energy_frac - need
-                e = 'ample' if left >= 0.4 else 'adequate' if left >= 0.25 else \
-                    'tight' if left >= 0.1 else 'critical'
-                pairs.append(f'{d}->{n}: {dist:.0f} m away, energy after sector: {e}, sector '
-                             f'{self.cov.fraction(self.sectors[i]):.0%} covered')
-        return {'mission': mission, 'pairs': '; '.join(pairs)}
+        raise ValueError(f'unknown question set {qset}')
 
     def mask(self, qset: str) -> dict[str, set[str]]:
         if qset == 'global':
             out = set()
             if self.phase in ('IDLE', 'DONE'):
-                return {'phase_transition': {'advance', 'recover_all', 'abort'}}
-            if not (self.ready() or self.forced()):
-                out.add('advance')
-            if self.phase in ('LAUNCH', 'TRANSIT') and any(
-                    s.airborne and s.link_lost_s > 0 for s in self.status.values()):
-                out.add('advance')
+                return {'phase_transition': {'recover_all', 'abort'}}
             if self.phase in ('LAUNCH', 'RECOVER', 'ABORT'):
                 out.add('recover_all')
             if self.phase == 'ABORT':
@@ -894,17 +869,32 @@ class Coordinator(Node):
                     self.phase in ('RECOVER', 'ABORT', 'DONE'):
                 out.add('request_inspection')
             return {'track_verdict': out}
+        if qset == 'report':
+            return {'report_response': self.report_masked()}
         return {}
+
+    def report_masked(self) -> set[str]:
+        """C4 options without a cause (live: request_support -> recall_drone lost uav1): recall
+        or hand off only a drone short on energy or with a fault; support needs a detection."""
+        r = self.report_focus[0] if self.report_focus else None
+        out = set(OPTIONAL)
+        if r is None:
+            return out
+        s = self.status.get(r['drone'])
+        if s is None or s.margin < 0.15 or s.faults or s.critical:
+            out.discard('recall_drone')
+            if r['drone'] in self.assign:
+                out.discard('reassign_sector')
+        if r['payload'].get('track'):
+            out.discard('dispatch_support')
+        return out
 
     def require(self, qset: str) -> dict[str, str]:
         # a per-item set with nothing in focus (a periodic refresh): FORCED status quo, no LLM
         if qset == 'track' and not self.track_focus:
             return {'track_verdict': 'await_data'}
-        if qset == 'report' and not self.report_focus:
-            return {'report_response': 'acknowledge'}
-        if qset == 'global' and self.forced() and self.phase in ('SEARCH', 'CONFIRM', 'LAUNCH',
-                                                                 'TRANSIT'):
-            return {'phase_transition': 'advance'}
+        if qset == 'report' and self.report_masked() == OPTIONAL:
+            return {'report_response': 'acknowledge'}     # nothing else is on the table
         return {}
 
     def on_decision(self, d: Decision) -> None:
@@ -915,9 +905,7 @@ class Coordinator(Node):
     def decided_global(self, d: Decision) -> None:
         pt = d.selected.get('phase_transition', 'stay')
         if self.phase not in ('IDLE', 'DONE'):
-            if pt == 'advance' and (self.ready() or self.forced()):
-                self.advance()
-            elif pt == 'recover_all' and self.phase in ('TRANSIT', 'SEARCH', 'CONFIRM'):
+            if pt == 'recover_all' and self.phase in ('TRANSIT', 'SEARCH', 'CONFIRM'):
                 self.event(f'recover_all ({d.phase})')
                 self.set_phase('RECOVER')
             elif pt == 'abort' and self.phase != 'ABORT':
@@ -926,8 +914,6 @@ class Coordinator(Node):
         risk = float(d.values.get('mission_risk', 0.0)) / 3
         if risk >= 0.75:
             self.engine.trigger('risk', 'global', priority='high')
-        if d.selected.get('replan_needed') == 'true' and self.phase in ('SEARCH', 'CONFIRM'):
-            self.request_plan('replan_needed')       # sectors move only via handoff / C4
         if d.selected.get('relay_needed') == 'true' and self.relay is None and \
                 self.phase == 'SEARCH':
             self.place_relay()
@@ -969,18 +955,6 @@ class Coordinator(Node):
         elif resp == 'recall_drone':
             self.recalled.add(drone)
             self.order(drone, 'rtb', {})
-        elif resp == 'replan':
-            self.request_plan(f'{drone} reported {r["kind"]}')
-
-    def decided_fit(self, d: Decision) -> None:
-        for i, n in enumerate(self.snames):
-            for dr in self.drones:
-                v = d.values.get(f'fit_{dr}_{n}')
-                if isinstance(v, (int, float)):
-                    self.u_fit[(dr, i)] = float(v) / 3
-        if self.fit_pending is not None:
-            self.fit_pending = None
-            self.allocate()
 
     def place_relay(self) -> None:
         """C8: a drone on the base -> worst-linked sector line where both hops have q >= 0.7."""

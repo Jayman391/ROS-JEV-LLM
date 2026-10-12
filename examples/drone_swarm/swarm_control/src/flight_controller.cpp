@@ -4,8 +4,9 @@
 //   LAND (SYSTEM_MODEL §5.1). A new goal preempts the current one, except LAND below 2 m. SURVEY
 //   remembers its progress per `detail` (sector), so `continue` after an inspection resumes.
 // - Safety (§7.1): H1-H5 filter every command (world.hpp); H6 energy reserve -> forced RTB;
-//   H7 lost link -> hold, then RTB; H8 critical failure -> `critical` in the status (the agent's
-//   require() turns it into land_now); a depleted battery lands in place.
+//   H7 lost link -> hold, then RTB, once a SURVEY/ORBIT/GOTO ends; H8 critical failure ->
+//   `critical` in the status (the agent's require() turns it into land_now); a depleted
+//   battery lands in place.
 // - Publishes DroneStatus on status and /swarm/status (5 Hz): the quantities the agent's masks use.
 // - Drives the Gazebo X3 through MulticopterVelocityControl (gazebo/command/twist, body frame;
 //   yaw is held at 0, so body = world up to small errors) and enable.
@@ -137,6 +138,9 @@ private:
   double now_s() {return get_clock()->now().seconds();}
   bool airborne() const {return pos_.z > 0.4;}
   bool homing() const {return job_.prim == "RTB" || job_.prim == "LAND";}
+  // H7 lets a finite pre-planned task finish out of link (like a PX4 mission's "continue");
+  // the drone holds / RTBs once it is idle. H6 still guards the energy.
+  bool on_task() const {return job_.prim == "SURVEY" || job_.prim == "ORBIT" || job_.prim == "GOTO";}
 
   bool accept(const Task::Goal & g)
   {
@@ -244,10 +248,10 @@ private:
     } else if (forced_ && !homing()) {
       finish(false, "forced RTB (H6: energy reserve)");
       start("RTB", Task::Goal(), nullptr, "H6 energy reserve");
-    } else if (airborne() && link_lost_s_ >= p_.lost_link_rtb_s && !homing()) {
+    } else if (airborne() && link_lost_s_ >= p_.lost_link_rtb_s && !homing() && !on_task()) {
       finish(false, "lost link: RTB (H7)");
       start("RTB", Task::Goal(), nullptr, "H7 lost link");
-    } else if (airborne() && link_lost_s_ >= p_.lost_link_hold_s && !homing() &&
+    } else if (airborne() && link_lost_s_ >= p_.lost_link_hold_s && !homing() && !on_task() &&
       job_.why != "H7 lost link")
     {
       finish(false, "lost link: holding (H7)");

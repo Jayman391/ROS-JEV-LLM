@@ -36,8 +36,8 @@ LAUNCH ─▶ TRANSIT ─▶ SEARCH ─▶ CONFIRM ─▶ RECOVER ─▶ DONE
 | LAUNCH | mission accepted | staggered takeoff to the transit altitude |
 | TRANSIT | all airborne | fly in formation from base to the AO edge |
 | SEARCH | formation at the AO | each drone surveys its assigned sector (lawnmower pattern); detections trigger local inspections |
-| CONFIRM | coverage ≥ target **or** time ≥ 70% of T_max | survey stops; drones are dispatched to unresolved tracks |
-| RECOVER | all tracks resolved **or** time ≥ 85% of T_max | return in formation, then staggered landing |
+| CONFIRM | coverage ≥ target **or** time left ≤ the way home + 120 s | survey stops; drones are dispatched to unresolved tracks |
+| RECOVER | all tracks resolved **or** time left ≤ the way home (farthest airborne drone's transit + descent + 8 s per drone + 30 s) | return in formation, then staggered landing |
 | ABORT | coordinator decision or a safety trigger | recall all drones immediately |
 
 SEARCH and CONFIRM can overlap: a drone that finishes its sector early can be sent to inspect while others still survey.
@@ -85,7 +85,7 @@ The vehicle is the Gazebo X3 quadcopter, driven by `MulticopterVelocityControl`.
 | Property | Value | Notes |
 |---|---|---|
 | Command interface | twist (vx, vy, vz, yaw_rate) on `/<ns>/gazebo/command/twist` | VERIFY phase 2: body frame or world frame; the controller rotates by yaw if needed |
-| Max horizontal speed | 5 m/s | survey 4 m/s, transit 5 m/s, inspection 2 m/s |
+| Max horizontal speed | 7 m/s | survey 6 m/s, transit 5 m/s, inspection 2 m/s |
 | Max climb / descent | 2 / 1.5 m/s | |
 | Max acceleration | 2 m/s² | enforced by the controller's rate limiter |
 | Max yaw rate | 1 rad/s | |
@@ -104,7 +104,7 @@ E(t)  = E_0 − ∫ P dt                                           [Wh]
 
 | Parameter | Default | Gives |
 |---|---|---|
-| E_0 | 60 Wh | about 20 min of hover, or about 15 min while surveying. One 72 m strip at 20 m takes about 7 min of the 15-minute mission; the worst strip out and back in 4 m/s wind needs 38 of the 54 usable Wh |
+| E_0 | 90 Wh | about 1,300 s while surveying. One 72 m strip at 20 m and 6 m/s takes about 300 s of the 900 s mission, leaving room for inspections, a second sector and the reserve |
 | P_hover | 180 W | |
 | k_h | 2.0 W/(m/s)² | +50 W at 5 m/s |
 | k_c | 25 W/(m/s) | |
@@ -143,7 +143,7 @@ The magnetometer and barometer are omitted because no decision uses them. They w
 - **Position estimate:** true position plus Gaussian noise, σ = 0.05·h + GPS error.
 - **False positives:** Poisson with rate λ_fp = 0.02 per covered cell per pass. Their class scores are drawn from the "nothing" row, which is deliberately ambiguous.
 - **Data association:** the detector tags detections that are within 5 m of an existing local track; the coordinator fuses tracks across drones.
-- **Survey quality**, which is what counts as coverage: h ≤ 40 m and v ≤ 5 m/s.
+- **Survey quality**, which is what counts as coverage: h ≤ 40 m and v ≤ 1.25·v_survey (7.5 m/s).
 
 **4.8 Link model:**
 - `q = 1 / (1 + exp((d − R_c)/s))`, with R_c = 250 m and s = 20 m (the far AO corner is ≈ 355 m out, so far sectors lose link). Here d is the distance to the base, or to the nearest relay drone if that link is better.
@@ -245,7 +245,7 @@ Hard constraints are enforced in C++ by the `flight_controller` safety layer *an
 | H4 | Drone separation ≥ d_sep = 4 m | pairwise repulsive field (neighbour positions from `/uavK/status`) |
 | H5 | Speed / acceleration / climb limits (§3) | saturation |
 | H6 | Energy reserve: if m_E ≤ 0, **forced RTB** | overrides the task; masks every action except `return_to_base` and `land_now` |
-| H7 | Lost link: q < 0.1 for 10 s → hold; for 30 s → RTB | timer in the agent, mirrored in the controller |
+| H7 | Lost link: q < 0.1 for 10 s → hold; for 30 s → RTB, but only once a SURVEY / ORBIT / GOTO has ended (pre-planned work finishes out of link; tracks are resent when the link returns) | timer in the agent, mirrored in the controller |
 | H8 | Critical failure (battery fault with m_E < −0.05, or a motor fault) → `land_now` is unmasked, and forced if no other action is feasible | |
 
 ### 7.2 Soft constraints
@@ -281,7 +281,7 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
 | env | `seed` | 0 | |
 | vehicle | `v_max_h`, `v_max_up`, `v_max_down`, `a_max`, `yaw_rate_max` | 5, 2, 1.5, 2, 1 | |
 | vehicle | `alt_survey`, `alt_transit`, `alt_inspect` | 20 (fixed, not planned), 40, 10 m | –, 30–50, 8–15 |
-| energy | `E_0`, `P_hover`, `k_h`, `k_c`, `k_w`, `reserve` | 60 Wh, 180 W, 2, 25, 1.5, 0.10 | |
+| energy | `E_0`, `P_hover`, `k_h`, `k_c`, `k_w`, `reserve` | 90 Wh, 180 W, 2, 25, 1.5, 0.10 | |
 | sensors | `det_fov`, `det_p0`, `det_h_opt`, `det_sigma_h`, `det_v_blur`, `det_lambda_fp` | 60°, 0.9, 15, 15, 8, 0.02 | |
 | comms | `R_c`, `link_slope`, `latency_ms` | 250 m, 20 m, 50 + U(0, 200) | |
 | safety | `d_sep`, `obstacle_clear`, `nfz_buffer`, `lost_link_hold_s`, `lost_link_rtb_s` | 4, 3, 5 m, 10, 30 s | |

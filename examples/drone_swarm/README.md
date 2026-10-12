@@ -22,7 +22,7 @@ ros2 launch drone_swarm swarm.launch.py seed:=3 t_max_s:=1200
 ```
 
 Defaults (`config/scenario.yaml`): 8 drones over 400 × 576 m (one 72 m strip each = 4 survey lanes
-at the fixed 20 m survey altitude), 8 survivors among 24 targets, 60 Wh batteries, wind ≤ 4 m/s, a
+at the fixed 20 m survey altitude), 8 survivors among 24 targets, 90 Wh batteries, wind ≤ 4 m/s, a
 900 s mission clock at 2× real time (~7.5 min wall). Drones ask Haiku only when Jev's
 `next_action` confidence is below 0.7; the coordinator asks Sonnet on every plan and global
 decision, and on track and report decisions below 0.3 (and on every confirmation).
@@ -63,16 +63,17 @@ ros2 jev search --runner drone_swarm.episode:SwarmEpisode --runner-arg t_max_s=3
 | `drone_agent` ×N | drone_swarm | jev_ai engine, set `step` (W1–W7) → tasks, reports |
 | `comms_sim` | swarm_control (C++) | the radio: drops and delays reports/directives by link quality |
 | `formation_planner` | swarm_control (C++) | Hungarian: sector allocation, formation slots |
-| `mission_coordinator` | drone_swarm | jev_ai engine (C1–C8), mission FSM, Sonnet plan, track fusion, dispatch, relay |
+| `mission_coordinator` | drone_swarm | jev_ai engine (C1–C5, C8), mission FSM, Sonnet plan, track fusion, dispatch, relay |
 | `mission_scorer` | drone_swarm | J (SYSTEM_MODEL §6), Labels for calibration, swarm status on the dashboard |
 | `jev_server`, `llm_server` (Haiku), `/coordinator/llm_server` (Sonnet), `decision_logger`, `dashboard` | jev_ai | the framework |
 
 **Mission:** LAUNCH (staggered takeoff) → TRANSIT (the C2 formation assembles over the base, then
-translates into the AO) → SEARCH (Hungarian allocation with C7 fit; lawnmower surveys; detections →
+translates into the AO) → SEARCH (Hungarian allocation on distance and energy; lawnmower surveys at 6 m/s, which keep going
+out of radio range; detections →
 W1 inspections and coordinator tracks → C3 verdicts → dispatch) → CONFIRM (survey stops, open
 tracks are inspected) → RECOVER (regroup in formation over the base, staggered landing) → DONE.
-Code owns the guards: `advance` is masked until the phase's work is done and required once its
-time budget is spent; models choose inside them.
+Code owns the routine: a phase ends when its work is done or when the farthest drone's way home
+says so; models judge the exceptions (recover or abort early, verdicts, reports).
 
 ## Simplifications (ponytail)
 

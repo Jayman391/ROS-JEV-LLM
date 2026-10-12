@@ -26,12 +26,12 @@
                 60.0, 220.0, 5.0, 25.0,  260.0, -120.0, 5.0, 32.0]
     nfz: [233.0, 192.0, 20.0,  313.0, -211.0, 18.0,  110.0, -150.0, 18.0,  340.0, 30.0, 20.0]
     # vehicle (§3)
-    v_max_h: 5.0
+    v_max_h: 7.0                  # headroom over v_survey for the safety filter
     v_max_up: 2.0
     v_max_down: 1.5
     a_max: 2.0
     yaw_rate_max: 1.0
-    v_survey: 4.0
+    v_survey: 6.0                 # (user, 2026-10-11) a strip in ~300 s; p_detect 0.40/frame-pass
     v_transit: 5.0
     v_inspect: 2.0
     alt_survey: 20.0              # fixed (not in the LLM plan): p_detect 0.52/pass vs 0.33 at 30 m
@@ -40,7 +40,7 @@
     alt_min: 5.0
     alt_max: 60.0
     # energy (§3.1)
-    E_0: 60.0                     # Wh (~915 s at survey speed)
+    E_0: 90.0                     # Wh (~1,300 s at survey speed: a strip + inspections + reserve)
     P_hover: 180.0                # W
     k_h: 2.0
     k_c: 25.0

@@ -172,17 +172,18 @@ def lane_spacing(p: dict, altitude: float | None = None) -> float:
 
 class Coverage:
     """The AO's cell_m grid; a cell is covered once its centre is inside a drone's detector
-    footprint at survey quality (h <= 40 m, v <= 5 m/s; §4.6)."""
+    footprint at survey quality (h <= 40 m, v <= 1.25 v_survey; §4.6)."""
 
     def __init__(self, p: dict):
         self.x0, x1, self.y0, y1 = p['ao']
         self.c = p['cell_m']
+        self.v_max = 1.25 * p['v_survey']         # a fixed 5.5 m/s counted nothing at 6 m/s
         self.nx, self.ny = int((x1 - self.x0) // self.c), int((y1 - self.y0) // self.c)
         self.tan = math.tan(math.radians(p['det_fov_deg']) / 2)
         self.covered: set[tuple[int, int]] = set()
 
     def see(self, x: float, y: float, h: float, v: float) -> None:
-        if not 2.0 < h <= 40.0 or v > 5.5:
+        if not 2.0 < h <= 40.0 or v > self.v_max:
             return
         r = h * self.tan
         i0, i1 = int((x - r - self.x0) // self.c), int((x + r - self.x0) // self.c)

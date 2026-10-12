@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import yaml
 
 from drone_swarm import mock_rules, scenario
-from drone_swarm.coordinator import catalog_for, Coordinator
+from drone_swarm.coordinator import CONFIRM_S, OPTIONAL, Coordinator
+from drone_swarm.drone_agent import DroneAgent
 from jev_ai.core.catalog import load_catalog
 
 CONFIG = Path(__file__).resolve().parents[1] / 'config'
@@ -46,30 +47,32 @@ def test_world_has_every_drone_and_target():
 def test_coverage_and_energy():
     p = params()
     cov = scenario.Coverage(p)
-    cov.see(100, 0, 30, 4)                                      # survey quality
+    cov.see(100, 0, 30, p['v_survey'])                          # survey quality
     seen = len(cov.covered)
     cov.see(200, 0, 50, 4)                                      # too high: nothing
     cov.see(200, 0, 30, 9)                                      # too fast: nothing
     assert seen > 5 and len(cov.covered) == seen
-    # every sector, out and home in the worst wind, fits in the battery above the reserve
+    # every sector, out and home in the worst wind, plus a launch's 5 min of hovering and two
+    # inspections' worth of slack, fits in the battery above the reserve (live: 60 Wh did not)
     usable = p['E_0'] * (1 - p['reserve'])
+    slack = p['P_hover'] * 300 / 3600 + 2 * p['P_hover'] * 60 / 3600
     for wind in ((p['wind_max'], 0), (-p['wind_max'], 0), (0, p['wind_max'])):
         for s in scenario.sectors(p):
             back = scenario.leg_wh(p, (s[2], (s[1] + s[3]) / 2), (0, 0), wind)
-            assert scenario.survey_wh(p, s, (0, 0), wind) + back < usable
+            assert scenario.survey_wh(p, s, (0, 0), wind) + back + slack < usable
     assert abs(scenario.link_q(p, p['R_c']) - 0.5) < 1e-9
 
 
 def test_catalogs_load_and_mock_answers_everything():
-    drones, sectors = ['uav1', 'uav2'], ['A', 'B']
-    cats = [load_catalog(yaml.safe_load(open(CONFIG / 'drone.yaml'))),
-            load_catalog(catalog_for(str(CONFIG / 'coordinator.yaml'), drones, sectors))]
-    assert 'fit_uav2_B' in cats[1].question_sets['fit'].questions
+    cats = [load_catalog(yaml.safe_load(open(CONFIG / name)))
+            for name in ('drone.yaml', 'coordinator.yaml')]
+    assert set(cats[1].question_sets) == {'global', 'track', 'report'}     # no generated fit set
+    assert all(c.policy.ask_jev == 'change' for c in cats)
     state = {'energy': 'ample (90% left)', 'detection': 'uav1-1, 40 m E: 2 sightings from 30 m; '
              'scores survivor 0.55, animal 0.30; not inspected; not reported',
              'evidence': '3 sightings, seen from 10 m at best; scores survivor 0.80',
-             'report': 'hazard (priority 0.30): {"faults": []}', 'pairs': 'uav1->A: 90 m away',
-             'mission': 'SEARCH, 2:00 of 10:00; ready to advance'}
+             'report': 'hazard (priority 0.30): {"faults": []}',
+             'mission': 'SEARCH, 2:00 of 10:00'}
     for cat in cats:
         for qs in cat.question_sets.values():
             for q in qs.questions.values():
@@ -120,9 +123,80 @@ def test_plan_cannot_change_survey_altitude():
     """Survey altitude is the scenario's (20 m), whatever the LLM plan says."""
     p = params()
     raw = {'survey_altitude_m': 40, 'transit_formation': 'v', 'formation_spacing_m': 8,
-           'search_end_frac': 0.7, 'recover_frac': 0.85, 'priority_sectors': ['A', 'Z']}
+           'priority_sectors': ['A', 'Z']}
     plan = Coordinator.validate_plan(SimpleNamespace(p=p, snames=['A', 'B']), raw)
     assert plan['survey_altitude_m'] == p['alt_survey'] == 20 and plan['priority_sectors'] == ['A']
-    assert 0.5 < scenario.p_detect(p, 20, p['v_survey']) < 0.55
+    assert 0.38 < scenario.p_detect(p, 20, p['v_survey']) < 0.42     # per 0.5 s frame at 6 m/s
     w = scenario.sectors(p)[0]
     assert (w[3] - w[1]) / scenario.lane_spacing(p) <= 4             # 4 whole lanes per strip
+    assert p['v_max_h'] > p['v_survey']                              # the FC can fly the survey
+
+
+def _status(**kw):
+    base = {'airborne': True, 'critical': False, 'faults': [], 'reflexes': [], 'margin': 0.5,
+            'link_lost_s': 0.0, 'over_obstacle': False, 'energy_frac': 0.8,
+            'energy_needed_frac': 0.2, 'position': SimpleNamespace(x=200.0, y=100.0),
+            'task': 'IDLE'}
+    return SimpleNamespace(**{**base, **kw})
+
+
+def test_idle_drone_holds_instead_of_picking_noise():
+    """Live: a drone parked with no order had continue and inspect masked; the models' leftovers
+    picked request_support, and the coordinator recalled it."""
+    me = SimpleNamespace(status=_status(), mission={'phase': 'SEARCH'}, support_since=None,
+                         p={'lost_link_hold_s': 10.0}, order=None, inspecting=None,
+                         tracks={}, now=lambda: 0.0)
+    me.unresolved = lambda: DroneAgent.unresolved(me)
+    me.live_order = lambda: DroneAgent.live_order(me)
+    me.mask = lambda qs: DroneAgent.mask(me, qs)
+    masked = me.mask('step')['next_action']
+    assert {'continue', 'inspect', 'request_support'} <= masked
+    assert DroneAgent.require(me, 'step') == {'next_action': 'hold'}
+    me.order = {'kind': 'survey', 'done': False}                     # an order: the models decide
+    assert DroneAgent.require(me, 'step') == {}
+
+
+def test_survey_runs_through_link_loss_and_resends():
+    """46% of the AO is past the usable link: a survey there keeps going (H7 waits for the task to
+    end) and the tracks it found are resent when the link comes back."""
+    lost = _status(link_lost_s=40.0, task='SURVEY')
+    me = SimpleNamespace(status=lost, mission={'phase': 'SEARCH'}, support_since=None,
+                         p={'lost_link_hold_s': 10.0}, order={'kind': 'survey', 'done': False},
+                         inspecting=None, tracks={}, now=lambda: 0.0)
+    me.unresolved = lambda: DroneAgent.unresolved(me)
+    me.live_order = lambda: DroneAgent.live_order(me)
+    assert 'continue' not in DroneAgent.mask(me, 'step')['next_action']
+    me.status = _status(link_lost_s=40.0, task='HOLD')
+    assert 'continue' in DroneAgent.mask(me, 'step')['next_action']        # idle: H7 applies
+
+    sent = []
+    t = {'id': 'T1', 'sightings': [(20.0, {})], 'reported': 0}
+    me = SimpleNamespace(link_bucket='lost', link_since=0.0, now=lambda: 1.0, tracks={'T1': t},
+                         engine=SimpleNamespace(trigger=lambda *a, **k: None),
+                         report=lambda *a, **k: sent.append(k['track']['id']))
+    DroneAgent._link(me, SimpleNamespace(quality=0.9))
+    assert sent == ['T1']
+
+
+def test_recall_needs_a_cause():
+    def coord(**s):
+        return SimpleNamespace(report_focus=({'drone': 'uav1', 'payload': {}}, 0.0),
+                               status={'uav1': _status(**s)}, assign={'uav1': 0})
+    healthy = coord()
+    assert Coordinator.report_masked(healthy) == OPTIONAL            # only acknowledge is left
+    low = Coordinator.report_masked(coord(margin=0.1))
+    assert 'recall_drone' not in low and 'reassign_sector' not in low
+    assert 'recall_drone' not in Coordinator.report_masked(coord(faults=['motor']))
+
+
+def test_search_ends_from_the_way_home():
+    p = params()
+    me = SimpleNamespace(p=p, t_max=900.0, phase='SEARCH', phase_t=0.0, now=lambda: 0.0,
+                         status={'uav1': _status(position=SimpleNamespace(x=400.0, y=300.0))})
+    me.recover_lead_s = lambda: Coordinator.recover_lead_s(me)
+    lead = me.recover_lead_s()
+    assert lead == 500 / p['v_transit'] + p['alt_transit'] / p['v_max_down'] + 8 + 30
+    me.elapsed = lambda: 900 - lead - CONFIRM_S - 1
+    assert not Coordinator.forced(me)
+    me.elapsed = lambda: 900 - lead - CONFIRM_S + 1
+    assert Coordinator.forced(me)

@@ -1,6 +1,7 @@
 # Drone swarm: the drone agent's catalog (DECISION_MODEL §3.1). Status-quo class first.
-# W2/W3 are always asked (jev_ai has no conditional questions); the agent ignores them while
-# detection = none.
+# W2/W3 are always asked (one Jev request per set); the agent ignores them while detection = none.
+# W4 energy_risk was removed (never read: H6 is deterministic). Jev is asked on a tick only when the
+# encoded state's words change (policy ask_jev: change), plus on triggers and every T_refresh.
 catalog_version: 1
 name: sar_drone
 question_sets:
@@ -20,7 +21,7 @@ question_sets:
           - {name: inspect, criteria: "Fly lower to look at the unresolved detection; worthwhile if it may be a survivor and energy allows.", reversible: until_commit}
           - {name: hold, criteria: "Hover and wait; the situation is unclear or orders are awaited.", reversible: true}
           - {name: return_to_base, criteria: "Go home now; energy, health or link make continuing unsafe or pointless.", reversible: true}
-          - {name: request_support, criteria: "Keep working but ask the coordinator for help or a handoff.", reversible: true}
+          - {name: request_support, criteria: "Keep working but ask the coordinator for help with a detection, hazard or fault.", reversible: true}
           - {name: land_now, criteria: "Emergency landing in place; only for a critical failure.", reversible: false}
         fallback: continue
         skip_llm_above_c: 0.7        # Haiku only when Jev's action choice is uncertain (live: ~11%)
@@ -42,11 +43,6 @@ question_sets:
         type: score
         instructions: "How important is it to resolve this detection soon?"
         classes: [{name: ignore}, {name: low}, {name: moderate}, {name: high}, {name: urgent}]
-        act: expectation
-      energy_risk:                                   # W4 (advisory: H6 is deterministic)
-        type: score
-        instructions: "How risky is the drone's energy situation for finishing its task and getting home, considering wind and distance?"
-        classes: [{name: comfortable}, {name: adequate}, {name: tight}, {name: critical}]
         act: expectation
       report_now:                                    # W5
         type: noul
@@ -86,3 +82,4 @@ policy:
   llm_timeout: 6.0               # wall s
   T_wait: 12.5                   # sim s: llm_timeout x scenario real_time_factor (2) + 0.5
   epoch_s: 5.0
+  ask_jev: change                # live: 7 questions x 8 drones every tick was ~56 Jev items / sim s

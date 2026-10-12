@@ -1,8 +1,8 @@
 """Rule hook for the keyless mock Jev (``mock.rules: drone_swarm.mock_rules:swarm``).
 
-Answers the drone (W1-W7) and coordinator (C1-C8) questions plausibly from the encoded state, so
-the demo flies a sensible mission without API keys. It reads only the text the agents encode
-(exactly what live Jev sees). Returning None falls back to the mock's seeded Dirichlet.
+Answers the drone (W1-W3, W5-W7) and coordinator (C1-C5, C8) questions plausibly from the encoded
+state, so the demo flies a sensible mission without API keys. It reads only the text the agents
+encode (exactly what live Jev sees). Returning None falls back to the mock's seeded Dirichlet.
 """
 from __future__ import annotations
 
@@ -13,29 +13,23 @@ CLASSES = {
                     'land_now'],
     'detection_class': ['survivor', 'animal', 'vehicle', 'debris', 'nothing'],
     'detection_priority': ['ignore', 'low', 'moderate', 'high', 'urgent'],
-    'energy_risk': ['comfortable', 'adequate', 'tight', 'critical'],
     'report_now': ['true', 'false'], 'unusual': ['true', 'false'],
     'situation': ['nominal', 'candidate_found', 'energy_concern', 'hazard', 'link_concern',
                   'fault', 'task_complete'],
-    'phase_transition': ['stay', 'advance', 'recover_all', 'abort'],
+    'phase_transition': ['stay', 'recover_all', 'abort'],
     'transit_formation': ['column', 'line', 'v', 'diamond', 'circle'],
     'mission_risk': ['low', 'moderate', 'elevated', 'severe'],
-    'replan_needed': ['true', 'false'], 'relay_needed': ['true', 'false'],
+    'relay_needed': ['true', 'false'],
     'track_verdict': ['await_data', 'confirm_survivor', 'confirm_non_survivor',
                       'request_inspection', 'dismiss'],
-    'report_response': ['acknowledge', 'dispatch_support', 'reassign_sector', 'recall_drone',
-                        'replan'],
+    'report_response': ['acknowledge', 'dispatch_support', 'reassign_sector', 'recall_drone'],
 }
-FIT = ['poor', 'fair', 'good', 'excellent']
 
 
 def swarm(state: dict, question) -> dict[str, float] | None:
     name = question.name
-    if name.startswith('fit_'):
-        p, classes = _fit(state, name), FIT
-    else:
-        rule = RULES.get(name)
-        p, classes = (rule(state) if rule else None), CLASSES.get(name)
+    rule = RULES.get(name)
+    p, classes = (rule(state) if rule else None), CLASSES.get(name)
     if p is None:
         return None
     p = [x + 0.005 for x in p]            # like real Jev, never exactly 0 (log-linear pooling)
@@ -97,11 +91,6 @@ def _detection_priority(s):
     return [0.3, 0.4, 0.2, 0.07, 0.03]
 
 
-def _energy_risk(s):
-    return {'ample': [0.8, 0.15, 0.04, 0.01], 'adequate': [0.3, 0.55, 0.12, 0.03],
-            'tight': [0.05, 0.25, 0.55, 0.15]}.get(_energy(s), [0.02, 0.08, 0.3, 0.6])
-
-
 def _report_now(s):
     det = s.get('detection', 'none')
     if 'not reported' in det or s.get('task', '').startswith('inspect') and 'done' in s['task']:
@@ -136,12 +125,9 @@ def _situation(s):
 # --- coordinator ---------------------------------------------------------------------------------
 
 def _phase_transition(s):
-    m = s.get('mission', '')
-    if 'ready to advance' in m:
-        return [0.15, 0.82, 0.02, 0.01]
     if 'severe' in s.get('risk_events', ''):
-        return [0.4, 0.05, 0.5, 0.05]
-    return [0.9, 0.07, 0.025, 0.005]
+        return [0.45, 0.5, 0.05]
+    return [0.96, 0.03, 0.01]
 
 
 def _transit_formation(s):
@@ -153,11 +139,6 @@ def _mission_risk(s):
     if r == 'none':
         return [0.7, 0.22, 0.06, 0.02]
     return [0.2, 0.4, 0.3, 0.1] if 'critical' not in r else [0.05, 0.2, 0.4, 0.35]
-
-
-def _replan_needed(s):
-    return [0.7, 0.3] if 'lost' in s.get('swarm', '') or 'recalled' in s.get('swarm', '') \
-        else [0.08, 0.92]
 
 
 def _relay_needed(s):
@@ -190,37 +171,19 @@ def _track_verdict(s):
 def _report_response(s):
     r = s.get('report', '').split(' ')[0]                      # the report kind
     if r == 'request_support':
-        return [0.2, 0.7, 0.05, 0.03, 0.02]
+        return [0.2, 0.7, 0.05, 0.05]
     if r == 'energy_concern':                 # H6 already brings a drone home in time
-        return [0.75, 0.03, 0.15, 0.05, 0.02]
+        return [0.75, 0.03, 0.15, 0.07]
     if r == 'fault':
-        return [0.35, 0.05, 0.25, 0.33, 0.02]
+        return [0.35, 0.05, 0.25, 0.35]
     if r == 'link_concern':
-        return [0.6, 0.1, 0.2, 0.08, 0.02]
-    return [0.9, 0.04, 0.03, 0.02, 0.01]
-
-
-def _fit(state, name):
-    """fit_<drone>_<sector>: nearer + more energy = better."""
-    _, drone, sector = name.split('_', 2)
-    line = next((ln for ln in state.get('pairs', '').split('; ')
-                 if ln.startswith(f'{drone}->{sector}:')), '')
-    m = re.search(r'(\d+) m away', line)
-    d = int(m.group(1)) if m else 200
-    tight = 'tight' in line or 'critical' in line
-    if tight:
-        return [0.6, 0.3, 0.08, 0.02]
-    if d < 120:
-        return [0.05, 0.15, 0.45, 0.35]
-    if d < 220:
-        return [0.1, 0.35, 0.4, 0.15]
-    return [0.3, 0.4, 0.25, 0.05]
+        return [0.6, 0.1, 0.2, 0.1]
+    return [0.9, 0.04, 0.03, 0.03]
 
 
 RULES = {'next_action': _next_action, 'detection_class': _detection_class,
-         'detection_priority': _detection_priority, 'energy_risk': _energy_risk,
+         'detection_priority': _detection_priority,
          'report_now': _report_now, 'unusual': _unusual, 'situation': _situation,
          'phase_transition': _phase_transition, 'transit_formation': _transit_formation,
-         'mission_risk': _mission_risk, 'replan_needed': _replan_needed,
-         'relay_needed': _relay_needed, 'track_verdict': _track_verdict,
-         'report_response': _report_response}
+         'mission_risk': _mission_risk, 'relay_needed': _relay_needed,
+         'track_verdict': _track_verdict, 'report_response': _report_response}
