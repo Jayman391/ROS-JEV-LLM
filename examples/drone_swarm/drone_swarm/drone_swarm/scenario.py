@@ -46,13 +46,43 @@ def from_node(node) -> dict:
     return load(path, **over)
 
 
-def drones(p: dict) -> list[str]:
+def workers(p: dict) -> list[str]:
+    """The searchers, one sector each: uav1..uav{num_drones}."""
     return [f'uav{k + 1}' for k in range(int(p['num_drones']))]
+
+
+def relays(p: dict) -> list[str]:
+    """One relay per 4 workers (user, 2026-10-11), named after the workers."""
+    n = int(p['num_drones'])
+    return [f'uav{n + k + 1}' for k in range(n // 4)]
+
+
+def drones(p: dict) -> list[str]:
+    """The whole fleet (world.hpp fleet_size): workers, then relays."""
+    return workers(p) + relays(p)
 
 
 def pad(p: dict, k: int) -> tuple[float, float]:
     """Landing spot of drone index k (0-based): a row along y through the base."""
-    return 0.0, (k - (int(p['num_drones']) - 1) / 2) * p['pad_spacing']
+    return 0.0, (k - (len(drones(p)) - 1) / 2) * p['pad_spacing']
+
+
+def cruise_alt(p: dict, drone: str) -> float:
+    """Takeoff / homing altitude: relays above everything, workers on 4 layers d_sep apart, so
+    paths to and from the sectors cross without meeting (no formation)."""
+    if drone in relays(p):
+        return p['alt_relay']
+    return p['alt_transit'] + p['d_sep'] * ((int(drone[3:]) - 1) % 4)
+
+
+def relay_bands(p: dict) -> dict[str, tuple[float, float]]:
+    """Relay -> the y band it serves: a run of contiguous sectors (8 workers: A-D, E-H)."""
+    rs, secs = relays(p), sectors(p)
+    if not rs:
+        return {}
+    per = len(secs) / len(rs)
+    return {r: (secs[round(k * per)][1], secs[round((k + 1) * per) - 1][3])
+            for k, r in enumerate(rs)}
 
 
 def sectors(p: dict, n: int | None = None) -> list[tuple[float, float, float, float]]:
@@ -115,7 +145,7 @@ def episode(p: dict, seed: int | None = None) -> dict:
     if p.get('faults', True):
         for _ in range(rng.randint(0, 2)):
             kind = rng.choice(FAULT_KINDS)
-            drone = rng.choice(drones(p))
+            drone = rng.choice(workers(p))      # relays added later: seeds keep their faults
             faults.append((drone, kind, round(rng.uniform(60, 300), 1)))
             if kind == 'comms_blackout':
                 blackouts.append((rng.uniform(x0 + 40, x1 - 40),
@@ -156,6 +186,42 @@ def survey_wh(p: dict, sector, frm: tuple[float, float], wind=(0.0, 0.0)) -> flo
 def link_q(p: dict, d: float) -> float:
     """Link quality at distance d from the base (§4.8; mirrors world.hpp link_quality)."""
     return 1.0 / (1.0 + math.exp((d - p['R_c']) / p['link_slope']))
+
+
+def q_at(p: dict, pt: tuple[float, float, float],
+         hubs: list[tuple[float, float, float, float]]) -> float:
+    """Link a drone at pt would get (sensor_sim's mesh, one hop): direct to the base, or via a
+    hub (x, y, z, its own q), whichever is better."""
+    return max([link_q(p, math.dist((0.0, 0.0, 0.0), pt))] +
+               [min(link_q(p, math.dist(h[:3], pt)), h[3]) for h in hubs])
+
+
+def one_centre(pts: list[tuple[float, float]], steps: int = 40) -> tuple[float, float]:
+    """Centre of the smallest circle around pts (Badoiu-Clarkson: step toward the farthest
+    point by 1/(i+1); within ~1/sqrt(steps) of optimal). ponytail: Welzl if it must be exact."""
+    cx, cy = pts[0]
+    for i in range(1, steps + 1):
+        fx, fy = max(pts, key=lambda q: (q[0] - cx) ** 2 + (q[1] - cy) ** 2)
+        cx, cy = cx + (fx - cx) / (i + 1), cy + (fy - cy) / (i + 1)
+    return cx, cy
+
+
+def relay_point(p: dict, pts: list[tuple[float, float]]) -> tuple[float, float, float]:
+    """Where a relay serves pts: their 1-centre, pulled back toward the base until the relay's
+    own uplink keeps relay_uplink_q, and pushed out of any no-fly zone."""
+    x, y = one_centre(pts)
+    z = p['alt_relay']
+    reach = p['R_c'] - p['link_slope'] * math.log(p['relay_uplink_q'] / (1 - p['relay_uplink_q']))
+    r_h = math.sqrt(max(reach ** 2 - z ** 2, 0.0))
+    d = math.hypot(x, y)
+    if d > r_h:
+        x, y = x * r_h / d, y * r_h / d
+    for nx, ny, r in nfzs(p):
+        dn, clear = math.hypot(x - nx, y - ny), r + p['nfz_buffer'] + 5.0
+        if dn < clear:
+            ux, uy = ((x - nx) / dn, (y - ny) / dn) if dn > 1e-6 else (-1.0, 0.0)
+            x, y = nx + ux * clear, ny + uy * clear
+    return x, y, z
 
 
 def p_detect(p: dict, h: float, speed: float) -> float:
@@ -311,7 +377,7 @@ def world_sdf(p: dict, seed: int | None = None) -> str:
     for i, (_, sy0, _, _) in enumerate(sectors(p)[1:], start=1):
         m.append(_box(f'sector_{i}', ((x0 + x1) / 2, sy0, 0.02), (x1 - x0, 0.4, 0.03),
                       (0.95, 0.95, 0.3), collide=False))
-    m.append(_cyl('base_pad', (0, 0, 0.01), 1 + p['pad_spacing'] * int(p['num_drones']) / 2, 0.02,
+    m.append(_cyl('base_pad', (0, 0, 0.01), 1 + p['pad_spacing'] * len(drones(p)) / 2, 0.02,
                   (0.3, 0.3, 0.35), collide=False))
     for i, (ox, oy, r, h) in enumerate(obstacles(p)):
         m.append(_cyl(f'obstacle_{i}', (ox, oy, h / 2), r, h, (0.55, 0.55, 0.55)))
@@ -321,7 +387,8 @@ def world_sdf(p: dict, seed: int | None = None) -> str:
         size, rgb = TARGET_LOOK[kind]
         m.append(_box(f'target_{tid}', (tx, ty, size[2] / 2), size, rgb, collide=False))
     for k, name in enumerate(drones(p)):
-        m.append(x3(name, *pad(p, k), DRONE_RGB[k % len(DRONE_RGB)]))
+        rgb = (1.0, 1.0, 1.0) if name in relays(p) else DRONE_RGB[k % len(DRONE_RGB)]
+        m.append(x3(name, *pad(p, k), rgb))                    # relays are white
     cx = (x0 + x1) / 2
     cam_z = 0.45 * (y1 - y0)            # whole AO in view, aimed at its centre at 0.6 rad pitch
     cam_x = cx - cam_z / math.tan(0.6)

@@ -10,7 +10,7 @@
 sim.launch.py generates the world for (num_drones, seed) under out_dir and runs the Gazebo server
 (and optionally the GUI) with ros_gz_bridge; then per drone flight_controller + sensor_sim (C++)
 + drone_agent,
-and environment, comms_sim, formation_planner, mission_coordinator, mission_scorer, plus jev_ai
+and environment, comms_sim, allocator, mission_coordinator, mission_scorer, plus jev_ai
 (jev_server, llm_server for the drones, /coordinator/llm_server, decision_logger, dashboard).
 Everything shares one run_id, so drones answering the same directive share their noise.
 """
@@ -56,7 +56,7 @@ def swarm(context):
                                                    'gui': a['gui'], 'out_dir': str(out)}.items()),
         Node(package='drone_swarm', executable='environment', parameters=[py], output='screen'),
         Node(package='swarm_control', executable='comms_sim', parameters=cpp, output='screen'),
-        Node(package='swarm_control', executable='formation_planner', parameters=cpp,
+        Node(package='swarm_control', executable='allocator', parameters=cpp,
              output='screen'),
         Node(package='drone_swarm', executable='mission_coordinator', namespace='coordinator',
              output='screen', remappings=TO_ROOT,

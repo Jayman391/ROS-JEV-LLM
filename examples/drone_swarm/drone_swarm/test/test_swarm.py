@@ -85,22 +85,12 @@ def test_catalogs_load_and_mock_answers_everything():
     assert max(r, key=r.get) == 'acknowledge'
 
 
-def test_order_ack_tells_formation_slots_apart():
-    """A stale status of the previous slot must not ack the next one (it was never sent)."""
-    a = Coordinator.expect('formation', {'point': [-12.0, 24.0, 40.0]})
-    b = Coordinator.expect('formation', {'point': [58.0, 20.0, 40.0]})
-    assert a == 'formation (-12, 24)' and not a.startswith(b)
+def test_order_ack_tells_relay_points_apart():
+    """A stale status of the previous point must not ack the next one (it was never sent)."""
+    a = Coordinator.expect('relay', {'point': [-12.0, 24.0, 56.0]})
+    b = Coordinator.expect('relay', {'point': [58.0, 20.0, 56.0]})
+    assert a == 'relay (-12, 24)' and not a.startswith(b)
     assert Coordinator.expect('takeoff', {}) == 'launch'
-
-
-def test_formation_tail_stays_ahead_of_the_pads():
-    """Live regression: an 8-drone 10 m column trailed to x = -58, past the H1 fence at -20;
-    four drones never reached their slots and TRANSIT timed out."""
-    from drone_swarm.coordinator import SLOT_X_MIN, ahead_shift
-    column = [12.0 - 10 * k for k in range(8)]                   # 12 .. -58
-    dx = ahead_shift(column, SLOT_X_MIN)
-    assert min(x + dx for x in column) == SLOT_X_MIN and dx == 70
-    assert ahead_shift([20.0, 30.0], SLOT_X_MIN) == 0             # already ahead: unchanged
 
 
 def test_relaunch_only_healthy_landed_drones_once():
@@ -112,7 +102,7 @@ def test_relaunch_only_healthy_landed_drones_once():
     orders, events = [], []
     me = SimpleNamespace(status={'uav5': st(), 'uav7': st(), 'uav8': st(faults=['motor']),
                                  'uav1': st(margin=0.04), 'uav2': st(task='SURVEY', airborne=True)},
-                         recalled={'uav7'}, relaunched=set(), p={'alt_transit': 40.0},
+                         recalled={'uav7'}, relaunched=set(), p=params(),
                          order=lambda d, k, pl: orders.append((d, k)), event=events.append)
     Coordinator.relaunch(me)
     Coordinator.relaunch(me)                                         # once per drone
@@ -122,8 +112,7 @@ def test_relaunch_only_healthy_landed_drones_once():
 def test_plan_cannot_change_survey_altitude():
     """Survey altitude is the scenario's (20 m), whatever the LLM plan says."""
     p = params()
-    raw = {'survey_altitude_m': 40, 'transit_formation': 'v', 'formation_spacing_m': 8,
-           'priority_sectors': ['A', 'Z']}
+    raw = {'survey_altitude_m': 40, 'priority_sectors': ['A', 'Z']}
     plan = Coordinator.validate_plan(SimpleNamespace(p=p, snames=['A', 'B']), raw)
     assert plan['survey_altitude_m'] == p['alt_survey'] == 20 and plan['priority_sectors'] == ['A']
     assert 0.38 < scenario.p_detect(p, 20, p['v_survey']) < 0.42     # per 0.5 s frame at 6 m/s
@@ -181,12 +170,15 @@ def test_survey_runs_through_link_loss_and_resends():
 def test_recall_needs_a_cause():
     def coord(**s):
         return SimpleNamespace(report_focus=({'drone': 'uav1', 'payload': {}}, 0.0),
+                               phase=s.pop('phase', 'SEARCH'),
                                status={'uav1': _status(**s)}, assign={'uav1': 0})
     healthy = coord()
     assert Coordinator.report_masked(healthy) == OPTIONAL            # only acknowledge is left
     low = Coordinator.report_masked(coord(margin=0.1))
     assert 'recall_drone' not in low and 'reassign_sector' not in low
     assert 'recall_drone' not in Coordinator.report_masked(coord(faults=['motor']))
+    # seed 0: in RECOVER, reassign_sector's hold replaced uav5's RTB for 5 minutes
+    assert Coordinator.report_masked(coord(margin=0.1, phase='RECOVER')) == OPTIONAL
 
 
 def test_search_ends_from_the_way_home():
@@ -195,8 +187,56 @@ def test_search_ends_from_the_way_home():
                          status={'uav1': _status(position=SimpleNamespace(x=400.0, y=300.0))})
     me.recover_lead_s = lambda: Coordinator.recover_lead_s(me)
     lead = me.recover_lead_s()
-    assert lead == 500 / p['v_transit'] + p['alt_transit'] / p['v_max_down'] + 8 + 30
+    assert lead == 500 / p['v_transit'] + p['alt_relay'] / p['v_max_down'] + 8 + 30
     me.elapsed = lambda: 900 - lead - CONFIRM_S - 1
     assert not Coordinator.forced(me)
     me.elapsed = lambda: 900 - lead - CONFIRM_S + 1
     assert Coordinator.forced(me)
+
+
+def test_fleet_has_one_relay_per_four_workers():
+    p = params()
+    assert scenario.workers(p)[-1] == 'uav8' and scenario.relays(p) == ['uav9', 'uav10']
+    assert len(scenario.drones(p)) == 10 and len(scenario.drones(params(num_drones=3))) == 3
+    bands = scenario.relay_bands(p)
+    x0, x1, y0, y1 = p['ao']
+    assert bands == {'uav9': (y0, 0.0), 'uav10': (0.0, y1)}           # sectors A-D, E-H
+    layers = {scenario.cruise_alt(p, d) for d in scenario.workers(p)[:4]}
+    assert layers == {40.0, 44.0, 48.0, 52.0}                        # d_sep apart: paths cross
+    assert scenario.cruise_alt(p, 'uav9') == p['alt_relay'] > max(layers)
+    assert max(o[3] for o in scenario.obstacles(p)) < p['alt_relay']
+    pads = [scenario.pad(p, k)[1] for k in range(10)]
+    assert pads[0] == -pads[-1]                                      # the row stays centred
+    assert 'uav10' in scenario.world_sdf(p)
+
+
+def test_relay_point_is_the_groups_centre_within_its_own_uplink():
+    p = params()
+    near = scenario.relay_point(p, [(100.0, 50.0), (140.0, 50.0), (120.0, 90.0)])
+    assert math.dist(near[:2], (120.0, 65.0)) < 6 and near[2] == p['alt_relay']   # circumcentre
+    far = scenario.relay_point(p, [(420.0, 288.0), (420.0, 216.0), (380.0, 250.0)])
+    assert scenario.link_q(p, math.dist((0, 0, 0), far)) >= p['relay_uplink_q'] - 1e-6
+    # what the far corner gets through it, vs direct (0.0): contact, if not a good link
+    hub = [(*far, scenario.link_q(p, math.dist((0, 0, 0), far)))]
+    assert scenario.q_at(p, (420.0, 288.0, 20.0), hub) > 0.1 > scenario.q_at(p, (420, 288, 20), [])
+    for nx, ny, r in scenario.nfzs(p):                                # never parked in a NFZ
+        at = scenario.relay_point(p, [(nx, ny)])
+        assert math.hypot(at[0] - nx, at[1] - ny) >= r + p['nfz_buffer']
+
+
+def test_leash_masks_inspections_beyond_the_relays():
+    p = params()
+    t = {'id': 'T1', 'x': 380.0, 'y': 250.0, 'sightings': [(20.0, {'survivor': 0.6})],
+         'inspected': False, 'resolved': False, 'reported': 1}
+    me = SimpleNamespace(status=_status(position=SimpleNamespace(x=370.0, y=240.0)),
+                         mission={'phase': 'SEARCH'}, support_since=None, p=p,
+                         order={'kind': 'survey', 'done': False}, inspecting=None,
+                         tracks={'T1': t}, peers={}, relays={'uav9', 'uav10'}, home=(0.0, 0.0),
+                         now=lambda: 0.0, evidence=DroneAgent.evidence)
+    for m in ('unresolved', 'live_order', 'best_track', 'reach'):
+        setattr(me, m, getattr(DroneAgent, m).__get__(me))
+    assert 'inspect' in DroneAgent.mask(me, 'step')['next_action']        # no relay out there
+    me.peers['uav10'] = SimpleNamespace(position=SimpleNamespace(x=200.0, y=120.0, z=56.0),
+                                        link_q=0.8, airborne=True)
+    assert me.reach(380.0, 250.0) >= p['leash_q']
+    assert 'inspect' not in DroneAgent.mask(me, 'step')['next_action']    # within its reach

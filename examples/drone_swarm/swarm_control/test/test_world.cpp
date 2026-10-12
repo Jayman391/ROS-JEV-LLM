@@ -1,4 +1,4 @@
-// gtest (B3/B4): the pure world model: Hungarian, formations, ray casting, energy, safety filter.
+// gtest (B3/B4): the pure world model: Hungarian, ray casting, energy, safety filter.
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -25,19 +25,6 @@ TEST(Hungarian, Rectangular)
   EXPECT_EQ(a, (std::vector<int>{-1, 0, 1}));
   const auto b = swarm_control::hungarian({5, 1, 2, 7}, 1, 4);    // 1 drone, 4 tracks
   EXPECT_EQ(b, (std::vector<int>{1}));
-}
-
-TEST(Formation, Shapes)
-{
-  for (const char * shape : {"column", "line", "v", "diamond", "circle"}) {
-    const auto s = swarm_control::formation_slots(shape, 4, 6.0);
-    ASSERT_EQ(s.size(), 4u) << shape;
-    double dmin = 1e9;
-    for (size_t i = 0; i < s.size(); ++i) {
-      for (size_t j = i + 1; j < s.size(); ++j) {dmin = std::min(dmin, (s[i] - s[j]).norm());}
-    }
-    EXPECT_GE(dmin, 6.0 - 1e-9) << shape;     // spacing >= d_sep-safe value
-  }
 }
 
 TEST(World, RayCylinder)

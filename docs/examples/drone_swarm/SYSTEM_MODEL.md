@@ -27,17 +27,16 @@ A swarm of N quadcopters (default N = 4) launches from a base pad. It must:
 **Mission phases** (the coordinator owns the transitions):
 
 ```
-LAUNCH ─▶ TRANSIT ─▶ SEARCH ─▶ CONFIRM ─▶ RECOVER ─▶ DONE
-   └──────────┴─────────┴──────────┴──────▶ ABORT (recall all)
+LAUNCH ─▶ SEARCH ─▶ CONFIRM ─▶ RECOVER ─▶ DONE
+   └─────────┴─────────┴──────────┴──────▶ ABORT (recall all)
 ```
 
 | Phase | Entered when | Swarm behaviour |
 |---|---|---|
-| LAUNCH | mission accepted | staggered takeoff to the transit altitude |
-| TRANSIT | all airborne | fly in formation from base to the AO edge |
-| SEARCH | formation at the AO | each drone surveys its assigned sector (lawnmower pattern); detections trigger local inspections |
+| LAUNCH | mission accepted | staggered takeoff, each drone to its own layer (workers 40/44/48/52 m, relays 56 m) |
+| SEARCH | all airborne at their layer | each worker flies straight to its sector and surveys it (lawnmower pattern); detections trigger local inspections; relays follow their band (§4.8) |
 | CONFIRM | coverage ≥ target **or** time left ≤ the way home + 120 s | survey stops; drones are dispatched to unresolved tracks |
-| RECOVER | all tracks resolved **or** time left ≤ the way home (farthest airborne drone's transit + descent + 8 s per drone + 30 s) | return in formation, then staggered landing |
+| RECOVER | all tracks resolved **or** time left ≤ the way home (farthest airborne drone's transit + descent + 8 s per drone + 30 s) | workers home nearest first, each on its layer, 8 s apart; relays last |
 | ABORT | coordinator decision or a safety trigger | recall all drones immediately |
 
 SEARCH and CONFIRM can overlap: a drone that finishes its sector early can be sent to inspect while others still survey.
@@ -89,7 +88,7 @@ The vehicle is the Gazebo X3 quadcopter, driven by `MulticopterVelocityControl`.
 | Max climb / descent | 2 / 1.5 m/s | |
 | Max acceleration | 2 m/s² | enforced by the controller's rate limiter |
 | Max yaw rate | 1 rad/s | |
-| Altitude band | 5–60 m AGL | survey 20 m, transit 40 m, inspection 10 m |
+| Altitude band | 5–60 m AGL | survey 20 m, transit layers 40/44/48/52 m (worker k: 40 + 4·(k mod 4)), relays 56 m, inspection 10 m |
 | State estimate | ground-truth odometry, 50 Hz | ponytail: perfect state; add an EKF over IMU+GPS only if GPS faults need to matter for control |
 
 ### 3.1 Energy model (simulated battery)
@@ -146,9 +145,11 @@ The magnetometer and barometer are omitted because no decision uses them. They w
 - **Survey quality**, which is what counts as coverage: h ≤ 40 m and v ≤ 1.25·v_survey (7.5 m/s).
 
 **4.8 Link model:**
-- `q = 1 / (1 + exp((d − R_c)/s))`, with R_c = 250 m and s = 20 m (the far AO corner is ≈ 355 m out, so far sectors lose link). Here d is the distance to the base, or to the nearest relay drone if that link is better.
+- `q = 1 / (1 + exp((d − R_c)/s))`, with R_c = 250 m and s = 20 m (the far AO corner is ≈ 509 m out: 46% of the AO is past contact, q < 0.1). Here d is the distance to the base, or a hop to any airborne drone, whose own q then caps the link (sensor_sim, so relays chain).
+- **Relays** (num_drones // 4, white X3s): relay k serves a band of contiguous sectors (8 workers: A–D, E–H). Every 5 s the coordinator moves it to the 1-centre of the airborne workers and open tracks in its band, pulled back so its own uplink keeps q ≥ 0.7 (≈ 226 m out at 56 m) and pushed out of no-fly zones; it re-targets only past 20 m.
+- **Leash:** a worker's own `inspect` detour needs the target within q ≥ 0.3 via the base or a relay. Coordinator orders are not leashed, and H7 lets SURVEY / ORBIT / GOTO finish out of link.
 - `comms_sim` relays drone→coordinator reports and coordinator→drone orders, dropping each message with probability 1 − q and adding latency 50 ms + U(0, 200) ms.
-- ponytail: ROS actions (FlyTo, Formation) bypass `comms_sim`. Instead the coordinator refuses to dispatch to a drone with q < 0.2. Real packet-level loss on actions would need a DDS router.
+- ponytail: ROS actions (Task, Allocate) bypass `comms_sim`. Instead the coordinator refuses to dispatch to a drone with q < 0.2. Real packet-level loss on actions would need a DDS router.
 
 ## 5. Action spaces
 
@@ -163,8 +164,7 @@ There are three layers. Only the **decision** layers (5.2, 5.3) are chosen by Je
 | `HOLD` | duration (0 = until replaced) | duration elapsed |
 | `SURVEY` | sector polygon, altitude, lane spacing (default 2r·0.8 overlap), speed | lawnmower finished |
 | `ORBIT` | centre, radius, altitude, laps | laps done |
-| `FORMATION_SLOT` | slot pose relative to the leader point (from the coordinator) | replaced |
-| `RTB` | — | over the assigned pad |
+| `RTB` | altitude (the drone's layer; 0 = alt_transit) | over the assigned pad |
 | `LAND` | — | on the ground, motors off |
 
 Primitives are preemptible: a new goal cancels the current one. Exceptions are `LAND` below 2 m and any active safety reflex.
@@ -188,12 +188,11 @@ The parameters of a chosen action (which detection, orbit radius, inspection alt
 
 | Decision | Options | Executes as |
 |---|---|---|
-| **Phase transition** (each cycle) | `stay`, `advance`, `recover_all`, `abort` | state-machine transition; triggers the phase's swarm behaviour |
-| **Transit formation** (on entering TRANSIT/RECOVER) | `column`, `line`, `v`, `diamond`, `circle` | Formation action; Hungarian slot assignment |
+| **Phase transition** (each cycle) | `stay`, `recover_all`, `abort` (phases advance by rule) | state-machine transition; triggers the phase's swarm behaviour |
 | **Sector allocation** (on entering SEARCH and after a drone is lost) | assignment matrix | Hungarian on cost C(d, s) ([DECISION_MODEL §7](DECISION_MODEL.md#7-domain-optimization-coordinator-allocator-c)) |
 | **Track verdict** (per fused detection track) | `confirm_survivor`, `confirm_non_survivor`, `request_inspection`, `dismiss`, `await_data` | updates the track registry; `request_inspection` → dispatch the cheapest feasible drone |
-| **Report response** (per incoming worker report) | `acknowledge`, `dispatch_support`, `reassign_sector`, `recall_drone`, `replan` | an order to the drone(s); `replan` → a Sonnet mission replan |
-| **Relay placement** (C8, in v1) | `none`, or `relay(drone, point)` | GOTO + HOLD on the base→sector line, where both hops have q ≥ 0.7 |
+| **Report response** (per incoming worker report, SEARCH and CONFIRM only) | `acknowledge`, `dispatch_support`, `reassign_sector`, `recall_drone` | an order to the drone |
+| **Relay placement** (a rule, every 5 s) | a point per relay | GOTO + HOLD at the band's 1-centre, uplink q ≥ 0.7 (§4.8) |
 
 ## 6. Objectives
 
@@ -271,7 +270,8 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
 
 | Group | Parameter | Default | Range |
 |---|---|---|---|
-| swarm | `num_drones` | 8 | 2–8 (one 72 m strip each) |
+| swarm | `num_drones` | 8 workers (+ 8 // 4 = 2 relays) | 2–8 (one 72 m strip each) |
+| swarm | `alt_relay`, `relay_uplink_q`, `leash_q` | 56 m, 0.7, 0.3 | |
 | env | `ao_bounds` | [20, 420] × [−288, 288] | |
 | env | `num_targets`, `num_survivors` | 24, 8 | |
 | env | `wind_speed` / `wind_dir` | random | 0–`wind_max` (4 m/s) / 0–2π |
@@ -296,7 +296,7 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
  user ─Mission.action─▶ mission_coordinator (jev_ai Agent, supervisor) ── FSM, tracks │
                      │    ├─ JevDecide.srv ──▶ jev (jev_ai_jev)                      │
                      │    ├─ Reason.action ──▶ llm (jev_ai_llm, Sonnet 5.5 medium)   │
-                     │    └─ Formation.action / Allocate.srv ─▶ formation_planner (C++)
+                     │    └─ Allocate.srv ─▶ allocator (C++, Hungarian)
                      └───────▲ jev_ai Reports (via comms_sim) ── Directives ▼ ────────┘
                      ┌───────┴────────────── /uavK (×N) ───────────────▼─────────────┐
                      │ drone_agent (jev_ai Agent) ── step set W1–W7                   │
@@ -313,7 +313,7 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
 
 **Ground-truth isolation:** only `environment`, `sensor_sim` and `mission_scorer` subscribe to `/env/ground_truth`.
 
-**Example-specific interfaces** (`swarm_interfaces`): `Detection`, `DetectionArray`, `LinkStatus`, `DroneStatus`, `Track`, `TrackArray`, `Allocate.srv`, `Task.action`, `Formation.action`, `Mission.action`. All decision traffic uses `jev_ai_msgs`.
+**Example-specific interfaces** (`swarm_interfaces`): `Detection`, `DetectionArray`, `LinkStatus`, `DroneStatus`, `Track`, `TrackArray`, `Allocate.srv`, `Task.action`, `Mission.action`. All decision traffic uses `jev_ai_msgs`.
 
 **Containers at N = 4:** 30 services from one image.
 
@@ -322,6 +322,6 @@ Every parameter is a ROS 2 parameter or an environment variable. They are groupe
 | Base | discovery, decision_logger |
 | Sim and world | sim + bridge, environment, comms_sim, mission_scorer |
 | Per drone (×N) | flight_controller, sensor_sim, jev, llm, drone_agent |
-| Coordinator | formation_planner, jev, llm, mission_coordinator |
+| Coordinator | allocator, jev, llm, mission_coordinator |
 
 **Kubernetes:** per-drone node types are StatefulSets whose pod ordinal gives the namespace (`uav{k+1}`).

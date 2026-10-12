@@ -2,7 +2,7 @@
 # Python reads the same file (drone_swarm.scenario.load). World frame: ENU, metres, base at origin.
 /**:
   ros__parameters:
-    num_drones: 8
+    num_drones: 8                 # workers, one sector each; plus num_drones // 4 relays
     seed: 0                       # episode seed: targets, wind, visibility, faults
     t_max_s: 900.0                # sim s (survey ~420 s + transit, confirm, recover)
     real_time_factor: 2.0         # sim s per wall s; LLM latency is wall time (see catalogs' T_wait)
@@ -35,7 +35,8 @@
     v_transit: 5.0
     v_inspect: 2.0
     alt_survey: 20.0              # fixed (not in the LLM plan): p_detect 0.52/pass vs 0.33 at 30 m
-    alt_transit: 40.0
+    alt_transit: 40.0             # worker k cruises at alt_transit + d_sep * (k % 4)
+    alt_relay: 56.0               # above every obstacle (45 m) and transit layer (52 m)
     alt_inspect: 10.0
     alt_min: 5.0
     alt_max: 60.0
@@ -59,6 +60,8 @@
     link_slope: 20.0
     latency_ms: 50.0
     latency_jitter_ms: 200.0
+    relay_uplink_q: 0.7           # a relay stays where its own link to the base is good
+    leash_q: 0.3                  # a worker inspects on its own only where q >= this
     # safety (§7.1)
     d_sep: 4.0
     obstacle_clear: 3.0

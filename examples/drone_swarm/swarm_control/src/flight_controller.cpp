@@ -1,6 +1,6 @@
 // flight_controller (B3): one per drone, in namespace /uavK. Deterministic; never asks a model.
 //
-// - Task action server (task): primitives TAKEOFF, GOTO, HOLD, SURVEY, ORBIT, FORMATION_SLOT, RTB,
+// - Task action server (task): primitives TAKEOFF, GOTO, HOLD, SURVEY, ORBIT, RTB,
 //   LAND (SYSTEM_MODEL §5.1). A new goal preempts the current one, except LAND below 2 m. SURVEY
 //   remembers its progress per `detail` (sector), so `continue` after an inspection resumes.
 // - Safety (§7.1): H1-H5 filter every command (world.hpp); H6 energy reserve -> forced RTB;
@@ -41,7 +41,7 @@ using GoalHandle = rclcpp_action::ServerGoalHandle<Task>;
 using swarm_interfaces::msg::DroneStatus;
 
 static const std::set<std::string> PRIMITIVES = {
-  "TAKEOFF", "GOTO", "HOLD", "SURVEY", "ORBIT", "FORMATION_SLOT", "RTB", "LAND"};
+  "TAKEOFF", "GOTO", "HOLD", "SURVEY", "ORBIT", "RTB", "LAND"};
 
 struct Job
 {
@@ -324,7 +324,7 @@ private:
       if (std::abs(pos_.z - alt_g) < 0.5) {return complete("at altitude", pos_);}
       return {0.5 * (j.hold.x - pos_.x), 0.5 * (j.hold.y - pos_.y), std::clamp(alt_g - pos_.z, -2.0, 2.0)};
     }
-    if (j.prim == "GOTO" || j.prim == "FORMATION_SLOT") {
+    if (j.prim == "GOTO") {
       const double speed = g.speed > 0 ? g.speed : p_.v_transit;
       const double d = hdist(g.target.x, g.target.y);
       if (j.stage == 0) {j.settle = d; j.stage = 1;}
@@ -389,7 +389,9 @@ private:
         j.prim = "LAND";                              // same goal: RTB completes on the ground
         return {};
       }
-      return go(home_.x, home_.y, p_.alt_transit, p_.v_transit);
+      // the drone's altitude layer (goal.altitude), so homing drones cross without meeting
+      const double alt = j.goal.altitude > 0 ? j.goal.altitude : p_.alt_transit;
+      return go(home_.x, home_.y, alt, p_.v_transit);
     }
     if (j.prim == "LAND") {
       j.eta = pos_.z / p_.v_max_down;

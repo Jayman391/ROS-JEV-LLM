@@ -1,5 +1,5 @@
 // Drone swarm world model shared by the C++ nodes (SYSTEM_MODEL §2-§4, §7): scenario params,
-// energy, link quality, ray casting, formation slots and the H1-H5 safety filter. Pure functions,
+// energy, link quality, ray casting and the H1-H5 safety filter. Pure functions,
 // so gtest covers them without ROS. The energy model is mirrored in drone_swarm/scenario.py.
 #pragma once
 
@@ -90,9 +90,12 @@ inline int drone_index(const std::string & name)
   return std::stoi(name.substr(i + 1)) - 1;
 }
 
+// num_drones workers plus one relay per 4 workers (uav{n+1}..), as drone_swarm.scenario.drones
+inline int fleet_size(const Params & p) {return p.num_drones + p.num_drones / 4;}
+
 inline V3 pad(const Params & p, int k)
 {
-  return {0.0, (k - (p.num_drones - 1) / 2.0) * p.pad_spacing, 0.0};
+  return {0.0, (k - (fleet_size(p) - 1) / 2.0) * p.pad_spacing, 0.0};
 }
 
 // --- energy (§3.1) ----------------------------------------------------------------------------
@@ -148,29 +151,6 @@ inline double ray_cylinder(double x, double y, double z, double a, const Cylinde
   const double disc = b * b - cc;
   if (disc < 0 || b > 0) {return std::numeric_limits<double>::infinity();}
   return -b - std::sqrt(disc);
-}
-
-// Formation slots in the leader frame (x forward, y left), slot 0 = the leader point.
-inline std::vector<V3> formation_slots(const std::string & shape, int n, double s)
-{
-  std::vector<V3> out;
-  for (int i = 0; i < n; ++i) {
-    const int k = (i + 1) / 2, side = (i % 2) ? 1 : -1;
-    if (shape == "line") {
-      out.push_back({0, (i - (n - 1) / 2.0) * s, 0});
-    } else if (shape == "v") {
-      out.push_back({-k * s, side * k * s, 0});
-    } else if (shape == "diamond") {
-      static const double dia[4][2] = {{0, 0}, {-1, 1}, {-1, -1}, {-2, 0}};
-      out.push_back(i < 4 ? V3{dia[i][0] * s, dia[i][1] * s, 0} : V3{-(i - 1) * s, 0, 0});
-    } else if (shape == "circle") {
-      const double r = n > 1 ? s / (2 * std::sin(M_PI / n)) : 0.0, a = 2 * M_PI * i / n;
-      out.push_back({r * std::cos(a), r * std::sin(a), 0});
-    } else {                                                    // column (default)
-      out.push_back({-i * s, 0, 0});
-    }
-  }
-  return out;
 }
 
 // --- safety filter (H1-H5) ----------------------------------------------------------------------

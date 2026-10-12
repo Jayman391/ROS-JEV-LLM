@@ -1,7 +1,7 @@
 # A flight primitive (SYSTEM_MODEL §5.1). A new goal preempts the current one, except LAND below
 # 2 m. Zero fields take the primitive's default.
-string primitive                 # TAKEOFF | GOTO | HOLD | SURVEY | ORBIT | FORMATION_SLOT | RTB | LAND
-geometry_msgs/Point target       # GOTO / FORMATION_SLOT point, ORBIT centre (z ignored: see altitude)
+string primitive                 # TAKEOFF | GOTO | HOLD | SURVEY | ORBIT | RTB | LAND
+geometry_msgs/Point target       # GOTO point, ORBIT centre (z ignored: see altitude)
 geometry_msgs/Point[] area       # SURVEY: two opposite corners of the sector rectangle
 float64 altitude
 float64 speed

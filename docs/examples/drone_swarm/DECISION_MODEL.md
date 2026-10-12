@@ -51,7 +51,7 @@ All values are computed in code and passed as bucket + rounded value + unit (FRA
   - `swarm`: one line per drone with task, energy and link
   - `tracks`, e.g. `"3 confirmed survivors, 1 confirmed other, 4 unresolved (2 likely survivor)"`
   - `time_budget`, e.g. `"search ends by 9:17, recover by 11:17; energy-limited by uav3 (margin 0.41)"` (from the time the swarm needs to get home)
-  - `comms`, e.g. `"sector D far half: link poor; no relay"`
+  - `comms`, e.g. `"uav3 (C): link poor (0.21); relays uav9 at (181, -120), uav10 at (175, 128)"`
   - `risk_events`
 - **`track`** (one per unresolved track): fused sightings, the best view altitude, the class beliefs gathered from reports, the position spread, the nearest confirmed survivor, and the cost of an inspection.
 - **`report`** (one per incoming report): the report's kind, its beliefs and payload, the sender's `swarm` line, and its sector's coverage.
@@ -87,9 +87,7 @@ W4 `energy_risk` was removed (2026-10-11): it was never read, since H6 is determ
 | ID | Set | Type / act | Name | Classes in order |
 |---|---|---|---|---|
 | C1 | global | choice / sample, τ 0.3 | `phase_transition` (stop early) | `stay` · `recover_all` (irreversible) · `abort` (irreversible) |
-| C2 | global | choice / sample, τ 0.5 | `transit_formation` | `column` · `line` · `v` · `diamond` · `circle` |
 | C5 | global | score / expectation | `mission_risk` | `low` · `moderate` · `elevated` · `severe` |
-| C8 | global | noul / threshold 0.5 | `relay_needed` | true: a sector's link is poor enough that reports are being lost · false |
 | C3 | track | choice / sample, τ 0.3 | `track_verdict` | `await_data` · `confirm_survivor` (irreversible) · `confirm_non_survivor` (irreversible) · `request_inspection` · `dismiss` |
 | C4 | report | choice / sample, τ 0.5 | `report_response` | `acknowledge` · `dispatch_support` · `reassign_sector` · `recall_drone` |
 
@@ -97,18 +95,17 @@ Removed 2026-10-11:
 - **C1 `advance`:** phases advance by rule. Live, Jev's hedged `stay` kept 8 drones hovering for 2 minutes.
 - **C6 `replan_needed` and the C4 `replan` response:** the plan no longer drives sectors or phase times.
 - **C7 `fit`:** 64 score questions per allocation. Hungarian over distance and energy needs no model.
+- **C2 `transit_formation`:** no formation; drones fly to and from their work on altitude layers.
+- **C8 `relay_needed`:** relays are dedicated drones placed by rule (§7); C8 never fired live (no free drone).
 
 **LLM params:**
 
 | Param | Range |
 |---|---|
 | `survey_altitude_m` | not planned: fixed at `alt_survey` (20 m) |
-| `formation_spacing_m` | [4, 12] |
-| `relay_point` | inside the AO, on the base→sector line |
 
 **Mission planning** is app code using the coordinator LLM node.
 - On `Mission.action`, Sonnet (effort `medium`) returns a structured plan:
-  - a transit formation preference and spacing, used only when the area is ≥ 150 m away (`SHORT_HOP_M`)
   - priority sectors
 - The survey altitude is fixed by the scenario. Phase times come from the rules in §4.
 - The plan is validated against the hard constraints. On failure it is re-asked once, then a default plan is used.
@@ -123,19 +120,16 @@ Removed 2026-10-11:
 | W5, W7 | agent | `Report(kind = W7, beliefs = [W2, W3], subject = track)` |
 | W6 | agent | trigger `app:unusual` (high priority) |
 | C1 | FSM | `recover_all` → RECOVER, `abort` → ABORT (both need Jev's and Sonnet's top class) |
-| C2 | FSM | Formation action (long hops only) |
 | C3 | track registry | `request_inspection` → dispatch (§6) |
 | C4 | coordinator | directives |
 | C5 | coordinator | u ≥ 0.75 → trigger `app:risk` |
-| C8 | coordinator | choose the relay drone and point (§6) → `relay` directive |
 
 **Phase rules** (code):
-- **LAUNCH → TRANSIT:** every drone is airborne at transit altitude, or 120 s have passed.
-- **TRANSIT:** an area closer than 150 m is entered directly (no formation). Otherwise the formation assembles and moves, with the same 120 s limit.
+- **LAUNCH → SEARCH:** every drone is airborne at its layer, or 120 s have passed. There is no transit formation: the sector orders fly each worker there.
 - **SEARCH → CONFIRM:** every sector is surveyed or 90 % is covered, or the time left equals CONFIRM's 120 s plus `recover_lead`.
 - **CONFIRM → RECOVER:** no open tracks, or the time left equals `recover_lead`.
-- **`recover_lead`:** the farthest drone's way home at `v_transit`, plus its descent, an 8 s landing stagger per drone and 30 s of slack.
-- **RECOVER:** a short hop lands nearest-first, 8 s apart, with no regroup formation.
+- **`recover_lead`:** the farthest drone's way home at `v_transit`, plus its descent from `alt_relay`, an 8 s landing stagger per drone and 30 s of slack.
+- **RECOVER:** workers land nearest first, 8 s apart, each homing on its own layer; relays land last.
 
 ## 5. Masks (hard constraints → forbidden classes)
 
@@ -143,11 +137,13 @@ Removed 2026-10-11:
 |---|---|
 | forced RTB (H6: m_E ≤ 0) | everything in W1 except `return_to_base`, `land_now` |
 | no unresolved detection | `inspect` |
+| best detection beyond the leash: q < 0.3 there via the base or any airborne relay | `inspect` (not mid-inspection) |
 | m_E < 0.1 | `inspect` |
 | m_E < 0.05 | `hold` |
 | support request pending < 20 s, or no detection, hazard or fault to ask about | `request_support` |
 | W1, airborne with `continue` and `inspect` both masked (no order, nothing to inspect) | `require()` → `hold` (no model; live, the leftovers were noise) |
 | C4, sender not short of energy (margin ≥ 0.15) and fault-free | `recall_drone`, `reassign_sector` |
+| C4, outside SEARCH and CONFIRM (seed 0: a `reassign_sector` hold replaced an RTB for 5 min) | `recall_drone`, `reassign_sector`, `dispatch_support` |
 | C4, report without a track | `dispatch_support`; only `acknowledge` left → `require()` it |
 | not in critical failure (H8), or over an obstacle | `land_now` |
 | link lost ≥ 10 s (H7) and not flying a SURVEY / ORBIT / GOTO | everything in W1 except `hold`, `return_to_base`, `land_now` |
@@ -179,13 +175,12 @@ C(d, s) = w_dist·dist(d, entry(s))/D_max + w_sw·[s ≠ current(d)]
         + BIG·[E_need(d, s) + E_rtb > E(d) − R]
 ```
 
-**Formation slots:** the Hungarian algorithm on squared distances.
-
 **Inspection dispatch:** `d* = argmin over feasible d of [t_travel(d, track) + w_opp·remaining_coverage_value(d)]`, excluding drones whose own W3 priority is above 0.75.
 
-**Relay** (when C8 fires):
-- The point is on the segment from the base to the worst-linked sector's centroid, where both hops have q ≥ 0.7.
-- The drone is the one with the lowest opportunity cost that is energy-feasible for the relay duration.
+**Relays** (rule, every 5 s, `scenario.relay_point`):
+- Relay k serves a band of contiguous sectors; its points are the airborne workers and open tracks in the band.
+- The point is their 1-centre (Bădoiu–Clarkson, 40 steps), pulled back toward the base until the relay's uplink keeps q ≥ 0.7, and pushed out of no-fly zones.
+- A new `relay` order only when the point moved more than 20 m. Relays are never allocated or dispatched.
 
 **Tuning** uses the framework tools:
 - **Labels:** `mission_scorer` publishes `Label`s for W2 and C3 (true class per track subject), which `ros2 jev calibrate` fits.

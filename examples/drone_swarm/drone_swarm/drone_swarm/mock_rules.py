@@ -1,6 +1,6 @@
 """Rule hook for the keyless mock Jev (``mock.rules: drone_swarm.mock_rules:swarm``).
 
-Answers the drone (W1-W3, W5-W7) and coordinator (C1-C5, C8) questions plausibly from the encoded
+Answers the drone (W1-W3, W5-W7) and coordinator (C1, C3-C5) questions plausibly from the encoded
 state, so the demo flies a sensible mission without API keys. It reads only the text the agents
 encode (exactly what live Jev sees). Returning None falls back to the mock's seeded Dirichlet.
 """
@@ -17,9 +17,7 @@ CLASSES = {
     'situation': ['nominal', 'candidate_found', 'energy_concern', 'hazard', 'link_concern',
                   'fault', 'task_complete'],
     'phase_transition': ['stay', 'recover_all', 'abort'],
-    'transit_formation': ['column', 'line', 'v', 'diamond', 'circle'],
     'mission_risk': ['low', 'moderate', 'elevated', 'severe'],
-    'relay_needed': ['true', 'false'],
     'track_verdict': ['await_data', 'confirm_survivor', 'confirm_non_survivor',
                       'request_inspection', 'dismiss'],
     'report_response': ['acknowledge', 'dispatch_support', 'reassign_sector', 'recall_drone'],
@@ -130,20 +128,11 @@ def _phase_transition(s):
     return [0.96, 0.03, 0.01]
 
 
-def _transit_formation(s):
-    return [0.15, 0.1, 0.55, 0.15, 0.05]
-
-
 def _mission_risk(s):
     r = s.get('risk_events', 'none')
     if r == 'none':
         return [0.7, 0.22, 0.06, 0.02]
     return [0.2, 0.4, 0.3, 0.1] if 'critical' not in r else [0.05, 0.2, 0.4, 0.35]
-
-
-def _relay_needed(s):
-    return [0.75, 0.25] if 'link poor' in s.get('comms', '') or 'lost' in s.get('comms', '') \
-        else [0.1, 0.9]
 
 
 def _track_verdict(s):
@@ -184,6 +173,5 @@ def _report_response(s):
 RULES = {'next_action': _next_action, 'detection_class': _detection_class,
          'detection_priority': _detection_priority,
          'report_now': _report_now, 'unusual': _unusual, 'situation': _situation,
-         'phase_transition': _phase_transition, 'transit_formation': _transit_formation,
-         'mission_risk': _mission_risk, 'relay_needed': _relay_needed,
+         'phase_transition': _phase_transition, 'mission_risk': _mission_risk,
          'track_verdict': _track_verdict, 'report_response': _report_response}

@@ -21,7 +21,7 @@ ros2 launch drone_swarm swarm.launch.py gui:=true jev_backend:=typesafe llm_back
 ros2 launch drone_swarm swarm.launch.py seed:=3 t_max_s:=1200
 ```
 
-Defaults (`config/scenario.yaml`): 8 drones over 400 × 576 m (one 72 m strip each = 4 survey lanes
+Defaults (`config/scenario.yaml`): 8 worker drones plus 2 relays (white) over 400 × 576 m (one 72 m strip each = 4 survey lanes
 at the fixed 20 m survey altitude), 8 survivors among 24 targets, 90 Wh batteries, wind ≤ 4 m/s, a
 900 s mission clock at 2× real time (~7.5 min wall). Drones ask Haiku only when Jev's
 `next_action` confidence is below 0.7; the coordinator asks Sonnet on every plan and global
@@ -62,18 +62,20 @@ ros2 jev search --runner drone_swarm.episode:SwarmEpisode --runner-arg t_max_s=3
 | `flight_controller` ×N | swarm_control (C++) | `task` action: TAKEOFF … LAND; safety H1–H8; DroneStatus |
 | `drone_agent` ×N | drone_swarm | jev_ai engine, set `step` (W1–W7) → tasks, reports |
 | `comms_sim` | swarm_control (C++) | the radio: drops and delays reports/directives by link quality |
-| `formation_planner` | swarm_control (C++) | Hungarian: sector allocation, formation slots |
-| `mission_coordinator` | drone_swarm | jev_ai engine (C1–C5, C8), mission FSM, Sonnet plan, track fusion, dispatch, relay |
+| `allocator` | swarm_control (C++) | Hungarian: sector allocation |
+| `mission_coordinator` | drone_swarm | jev_ai engine (C1, C3–C5), mission FSM, Sonnet plan, track fusion, dispatch, relay rule |
 | `mission_scorer` | drone_swarm | J (SYSTEM_MODEL §6), Labels for calibration, swarm status on the dashboard |
 | `jev_server`, `llm_server` (Haiku), `/coordinator/llm_server` (Sonnet), `decision_logger`, `dashboard` | jev_ai | the framework |
 
-**Mission:** LAUNCH (staggered takeoff) → TRANSIT (the C2 formation assembles over the base, then
-translates into the AO) → SEARCH (Hungarian allocation on distance and energy; lawnmower surveys at 6 m/s, which keep going
-out of radio range; detections →
-W1 inspections and coordinator tracks → C3 verdicts → dispatch) → CONFIRM (survey stops, open
-tracks are inspected) → RECOVER (regroup in formation over the base, staggered landing) → DONE.
-Code owns the routine: a phase ends when its work is done or when the farthest drone's way home
-says so; models judge the exceptions (recover or abort early, verdicts, reports).
+**Mission:** LAUNCH (staggered takeoff, each drone to its own altitude layer) → SEARCH (Hungarian
+allocation on distance and energy; each worker flies straight to its sector and surveys it at 6 m/s,
+out of radio range if need be; detections → W1 inspections and coordinator tracks → C3 verdicts →
+dispatch) → CONFIRM (survey stops, open tracks are inspected) → RECOVER (workers home nearest first
+on their layers, relays last) → DONE. No formation: every drone acts on its own. Relays (one per 4
+workers) follow the workers and open tracks of their band, keeping their own link home good; a
+worker may detour to inspect only where a relay or the base reaches (q ≥ 0.3). Code owns the
+routine: a phase ends when its work is done or when the farthest drone's way home says so; models
+judge the exceptions (recover or abort early, verdicts, reports).
 
 ## Simplifications (ponytail)
 

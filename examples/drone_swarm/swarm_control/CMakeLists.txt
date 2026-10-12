@@ -19,7 +19,7 @@ find_package(swarm_interfaces REQUIRED)
 set(DEPS rclcpp rclcpp_action geometry_msgs nav_msgs sensor_msgs std_msgs diagnostic_msgs
   jev_ai_msgs swarm_interfaces)
 
-foreach(node flight_controller sensor_sim comms_sim formation_planner)
+foreach(node flight_controller sensor_sim comms_sim allocator)
   add_executable(${node} src/${node}.cpp)
   target_include_directories(${node} PRIVATE include)
   ament_target_dependencies(${node} ${DEPS})

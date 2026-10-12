@@ -38,7 +38,7 @@ public:
     const auto report_qos = rclcpp::QoS(50).best_effort();
     const auto directive_qos = rclcpp::QoS(50).reliable();
     up_ = create_publisher<Report>("/coordinator/reports", report_qos);
-    for (int k = 1; k <= p_.num_drones; ++k) {
+    for (int k = 1; k <= fleet_size(p_); ++k) {
       const std::string d = "uav" + std::to_string(k);
       q_[d] = 1.0;
       subs_.push_back(create_subscription<swarm_interfaces::msg::LinkStatus>(

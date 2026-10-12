@@ -16,7 +16,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Track.msg"
   "msg/TrackArray.msg"
   "srv/Allocate.srv"
-  "srv/Formation.srv"
   "action/Task.action"
   "action/Mission.action"
   DEPENDENCIES std_msgs geometry_msgs action_msgs

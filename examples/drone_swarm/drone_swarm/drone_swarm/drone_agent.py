@@ -10,6 +10,9 @@ The question set ``step`` (W1-W7, ``config/drone.yaml``) runs at 1 Hz with act-t
 - With no order and nothing to inspect, ``require`` holds the drone (no model call can pick noise).
 - Out of link, a SURVEY / ORBIT / GOTO runs to its end (H7 waits); tracks reported while the link
   was poor or lost are resent when it comes back.
+- Leash (user, 2026-10-11): no formation, each drone acts on its own, but an ``inspect`` detour
+  needs the target within the relays' reach (link q >= leash_q via the base or a relay).
+  Relays run this same agent; their standing order is a ``relay`` point from the coordinator.
 Masks (DECISION_MODEL §5) come from DroneStatus, the same numbers the C++ safety layer uses.
 Coordinator orders arrive as jev_ai directives through comms_sim; each is a decision event in the
 directive's noise epoch, so drones answering the same order share their Gumbel noise.
@@ -51,6 +54,7 @@ class DroneAgent(Node):
         self.p = scenario.from_node(self)
         self.name = self.get_namespace().strip('/') or 'uav1'
         self.home = scenario.pad(self.p, int(self.name[3:]) - 1)
+        self.relays = set(scenario.relays(self.p))
         share = get_package_share_directory('drone_swarm')
         catalog = self.declare_parameter('catalog', share + '/config/drone.yaml').value
         run_id = self.declare_parameter('run_id', '').value or None
@@ -268,10 +272,16 @@ class DroneAgent(Node):
             return f'order: survey sector {o.get("sector", "?")}'
         if k == 'inspect':
             return f'order: inspect track {o.get("track", "?")}'
-        if k in ('goto', 'formation', 'relay'):
+        if k in ('goto', 'relay'):
             x, y = o.get('point', [0, 0])[:2]
             return f'order: {k} to ({x:.0f}, {y:.0f})'
         return f'order: {k}'
+
+    def reach(self, x: float, y: float) -> float:
+        """Link a drone would have inspecting at (x, y): via the base or an airborne relay."""
+        hubs = [(r.position.x, r.position.y, r.position.z, r.link_q)
+                for n, r in self.peers.items() if n in self.relays and r.airborne]
+        return scenario.q_at(self.p, (x, y, self.p['alt_inspect']), hubs)
 
     def live_order(self) -> bool:
         return bool(self.order) and not self.order['done']
@@ -286,6 +296,9 @@ class DroneAgent(Node):
         if not self.unresolved() or s.margin < 0.1 or \
                 self.mission['phase'] not in ('SEARCH', 'CONFIRM'):
             out.add('inspect')                                   # detours only while searching
+        t = self.best_track() if 'inspect' not in out else None
+        if t and t['id'] != self.inspecting and self.reach(t['x'], t['y']) < self.p['leash_q']:
+            out.add('inspect')                                   # leash: beyond the relays' reach
         if s.margin < 0.05:
             out.add('hold')
         if self.support_since is not None and self.now() - self.support_since < SUPPORT_WAIT_S or \
@@ -345,7 +358,7 @@ class DroneAgent(Node):
         elif a == 'hold':
             self.send('HOLD', 'waiting', duration=float(d.llm_params.get('hold_s', 0.0)))
         elif a == 'return_to_base':
-            self.send('RTB', 'home')
+            self.send('RTB', 'home', altitude=scenario.cruise_alt(self.p, self.name))
         elif a == 'request_support':
             if self.support_since is None or self.now() - self.support_since >= SUPPORT_WAIT_S:
                 self.support_since = self.now()
@@ -370,11 +383,10 @@ class DroneAgent(Node):
         if k == 'takeoff':
             self.send('TAKEOFF', 'launch',
                       altitude=float(o.get('altitude', self.p['alt_transit'])))
-        elif k in ('goto', 'formation', 'relay'):
+        elif k in ('goto', 'relay'):
             x, y, z = (list(o.get('point', [0, 0, 0])) + [0])[:3]
-            # the point is in the detail: the coordinator's ack must tell two slots apart
-            self.send('FORMATION_SLOT' if k == 'formation' else 'GOTO', f'{k} ({x:.0f}, {y:.0f})',
-                      target=(x, y),
+            # the point is in the detail: the coordinator's ack must tell two points apart
+            self.send('GOTO', f'{k} ({x:.0f}, {y:.0f})', target=(x, y),
                       altitude=float(z or self.p['alt_transit']),
                       speed=float(o.get('speed', 0.0)))
         elif k == 'survey':
@@ -386,7 +398,7 @@ class DroneAgent(Node):
             self.send('ORBIT', f'inspect {o.get("track", "?")} ({x:.0f}, {y:.0f})', target=(x, y),
                       altitude=self.p['alt_inspect'], radius=6.0, laps=1)
         elif k == 'rtb':
-            self.send('RTB', 'recall')
+            self.send('RTB', 'recall', altitude=float(o.get('altitude', 0.0)))
         elif k == 'hold':
             self.send('HOLD', 'ordered')
         elif k == 'land':
@@ -445,7 +457,7 @@ class DroneAgent(Node):
             self.inspecting = None
             self.committed = False
         if self.order and not self.order['done'] and detail.startswith(
-                ('launch', 'goto', 'formation', 'relay', 'sector', 'inspect', 'recall',
+                ('launch', 'goto', 'relay', 'sector', 'inspect', 'recall',
                  'ordered')) and (prim != 'ORBIT' or self.order['kind'] == 'inspect'):
             self.order['done'] = True
         self.engine.completed('next_action')

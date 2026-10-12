@@ -30,7 +30,7 @@ spec:
   selector: {app: sim}
   ports: [{port: 6080, targetPort: novnc, name: novnc}]
 ---
-# world nodes: environment (ground truth), comms_sim, formation_planner, mission_scorer
+# world nodes: environment (ground truth), comms_sim, allocator, mission_scorer
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,10 +55,10 @@ spec:
                  -p, "num_drones:=$(NUM_DRONES)", -p, "seed:=$(SEED)", -p, use_sim_time:=true]
           envFrom: [{configMapRef: {name: jev-ai-env}}]
           resources: {requests: {cpu: 20m, memory: 64Mi}, limits: {cpu: 300m, memory: 256Mi}}
-        - name: formation-planner
+        - name: allocator
           image: jev-ai
           imagePullPolicy: IfNotPresent
-          args: [ros2, run, swarm_control, formation_planner]
+          args: [ros2, run, swarm_control, allocator]
           envFrom: [{configMapRef: {name: jev-ai-env}}]
           resources: {requests: {cpu: 10m, memory: 64Mi}, limits: {cpu: 200m, memory: 128Mi}}
         - name: mission-scorer
@@ -103,14 +103,15 @@ spec:
 ---
 # One pod per drone: pod uav-K is drone uav{K+1} (namespace /uav{K+1}); three containers, one per
 # node (flight_controller, sensor_sim, drone_agent). Scale with `replicas:` in kustomization.yaml
-# together with NUM_DRONES (the world has that many X3s).
+# together with NUM_DRONES: replicas = N + N/4 (workers, then relays; the world has that many
+# X3s).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: uav
 spec:
   serviceName: uav
-  replicas: 8
+  replicas: 10
   podManagementPolicy: Parallel
   selector: {matchLabels: {app: uav}}
   template:

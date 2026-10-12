@@ -1,6 +1,7 @@
 # Drone swarm: the mission coordinator's catalog (DECISION_MODEL §3.2). Rules own the routine
 # (phase advances, sector allocation, recalls need a cause); Jev + Sonnet judge what needs
-# judgement: stopping the mission early, formation, risk, relays, track verdicts, report responses.
+# judgement: stopping the mission early, risk, track verdicts, report responses. Relays are
+# placed by rule (coordinator.place_relays); there is no formation (drones fly on layers).
 # `track` and `report` are per-item sets: the coordinator decides one item at a time and passes
 # that item's own standing class as `current`.
 catalog_version: 1
@@ -21,29 +22,11 @@ question_sets:
           - {name: abort, criteria: "Recall everything immediately; only for a mission-threatening situation.", reversible: false}
         fallback: stay
         tau: 0.3
-      transit_formation:                             # C2
-        type: choice
-        instructions: "Which formation should the swarm fly in transit?"
-        act: sample
-        classes:
-          - {name: column, reversible: true}
-          - {name: line, reversible: true}
-          - {name: v, reversible: true}
-          - {name: diamond, reversible: true}
-          - {name: circle, reversible: true}
-        fallback: column
-        tau: 0.5
       mission_risk:                                  # C5
         type: score
         instructions: "How much risk is the mission in right now (losing drones, missing survivors, running out of time)?"
         classes: [{name: low}, {name: moderate}, {name: elevated}, {name: severe}]
         act: expectation
-      relay_needed:                                  # C8
-        type: noul
-        instructions: "Is a relay drone needed to keep a far sector in contact?"
-        criteria: {"true": "A sector's link is poor enough that reports are being lost.", "false": "Links are adequate."}
-        act: threshold
-        threshold: 0.5
     llm:
       system: "You are {agent}, the mission coordinator of a search-and-rescue drone swarm. Maximise confirmed survivors and area coverage within the mission clock, recover every drone safely, and spend LLM effort only where it changes outcomes."
   track:

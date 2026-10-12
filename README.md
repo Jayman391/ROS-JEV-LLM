@@ -62,7 +62,8 @@ Keys are read from the environment only. Never put them in a catalog, in ROS par
 | `minimal` | the 4 callbacks, nothing else | `ros2 run jev_ai_examples minimal` |
 | `toy_patrol` | a fleet with shared noise, a supervisor, reports and directives, labels for calibration | `ros2 launch jev_ai_examples toy_patrol.launch.py` |
 | `turtlesim` | the same agent in Python, C++ and a behavior tree | `ros2 launch jev_ai_examples turtlesim.launch.py` |
-| [`drone_swarm`](examples/drone_swarm/README.md) | search and rescue in Gazebo: 8 drones and a coordinator. Rules fly; Jev and Claude judge | `ros2 launch drone_swarm swarm.launch.py gui:=true` |
+| [`drone_swarm`](examples/drone_swarm/README.md) | search and rescue in Gazebo: 8 workers, 2 relays and a coordinator. Rules fly; Jev and Claude judge | `ros2 launch drone_swarm swarm.launch.py gui:=true` |
+| [`assembly_line`](examples/assembly_line/) | five arms at four stations build three products while pallets move arm to arm; supervisor (release / disruption / tool drift), per-arm op checks and fasten coop, QA with two-key scrap; discrete-event line_sim with RViz or a Gazebo Fortress puppet view | `ros2 launch assembly_line assembly_line.launch.py` |
 
 ## Docs
 

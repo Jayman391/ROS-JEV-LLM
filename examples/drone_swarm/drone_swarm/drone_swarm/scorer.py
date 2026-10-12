@@ -35,6 +35,8 @@ class Scorer(Node):
         self.run_id = self.declare_parameter('run_id', '').value
         self.summary_path = self.declare_parameter('summary_path', '').value
         self.drones = scenario.drones(self.p)
+        self.workers = set(scenario.workers(self.p))
+        self.contact = [0.0, 0.0]          # airborne worker-s within leash_q, all airborne worker-s
         self.cov = scenario.Coverage(self.p)
         self.gt: GroundTruth | None = None
         self.status: dict[str, DroneStatus] = {}
@@ -126,6 +128,9 @@ class Scorer(Node):
 
     def penalties(self, dt: float) -> None:
         for d, s in self.status.items():
+            if d in self.workers and s.airborne:
+                self.contact[0] += dt * (s.link_q >= self.p['leash_q'])
+                self.contact[1] += dt
             if any(math.hypot(s.position.x - x, s.position.y - y) < r and s.position.z < h
                    for x, y, r, h in scenario.obstacles(self.p)):
                 self.pen['collision'].add(d)
@@ -175,6 +180,7 @@ class Scorer(Node):
             p['w_usd'] * self.cost_usd
         return {'J': round(J, 2), 'recall': round(recall, 3), 'precision': round(precision, 3),
                 'coverage': round(self.cov.fraction(), 3), 't_done_s': round(t_done, 1),
+                'contact': round(self.contact[0] / self.contact[1], 3) if self.contact[1] else 1.0,
                 'energy_wh': round(used, 2), 'llm_usd': round(self.cost_usd, 4),
                 'penalties': round(pen, 1), 'survivors': len(surv),
                 'survivors_found': len(found), 'confirmations': len(conf),
@@ -208,6 +214,7 @@ class Scorer(Node):
                 name=d, hardware_id='swarm', level=lvl,
                 message=f'{s.task.lower()} {s.task_detail}'.strip() + f' {s.progress:.0%}',
                 values=[KeyValue(key=k, value=v) for k, v in (
+                    ('role', 'worker' if d in self.workers else 'relay'),
                     ('position', f'({s.position.x:.0f}, {s.position.y:.0f}, {s.position.z:.0f})'),
                     ('energy', f'{s.energy_frac:.0%} (margin {s.margin:+.2f})'),
                     ('link', f'{s.link_q:.2f}'),
