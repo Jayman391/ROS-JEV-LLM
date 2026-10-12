@@ -158,6 +158,18 @@ def test_routine_path_skips_the_model():
     assert not routine_ok(arm_status(dropout=True), p, '')
 
 
+def test_report_payload_may_carry_kind():
+    """Smoke-run regression: report('fault', kind='jam') crashed the arm agent (two kinds)."""
+    from assembly_line.arm_agent import ArmAgent
+    sent = []
+    me = NS(status=arm_status(), name='arm_b',
+            hierarchy=NS(report=lambda what, **kw: sent.append((what, kw))))
+    ArmAgent.report(me, 'fault', priority=0.8, kind='jam', est_clear_s=40)
+    ArmAgent.report(me, 'hand_off', priority=0.6, part=3, op=1, kind='weld')
+    assert [w for w, _ in sent] == ['fault', 'hand_off']
+    assert sent[0][1]['payload']['kind'] == 'jam' and sent[1][1]['payload']['kind'] == 'weld'
+
+
 # --- scoring -------------------------------------------------------------------------------------
 
 def outcome(pid, outcome, defective, done, product='A', reworks=0):

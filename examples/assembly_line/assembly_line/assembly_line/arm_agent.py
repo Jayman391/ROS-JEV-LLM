@@ -332,13 +332,14 @@ class ArmAgent(Node):
             self.defer_after_cancel = None
             self.send('defer', part, op)
 
-    def report(self, kind: str, priority: float, **payload) -> None:
+    def report(self, what: str, priority: float, **payload) -> None:
+        """A Report up; ``payload`` may carry its own ``kind`` (jam, the op kind...)."""
         s = self.status
         if s is not None:
             payload.setdefault('state', s.state)
             payload.setdefault('wear_est', None if math.isnan(s.wear_est) else
                                round(s.wear_est, 3))
-        self.hierarchy.report(kind, subject=self.name, priority=priority, payload=payload)
+        self.hierarchy.report(what, subject=self.name, priority=priority, payload=payload)
 
 
 def main(args=None):
